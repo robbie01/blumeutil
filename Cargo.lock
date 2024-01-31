@@ -996,17 +996,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "stcm2"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "byteorder",
- "clap",
- "encoding_rs",
- "rusqlite",
-]
-
-[[package]]
 name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

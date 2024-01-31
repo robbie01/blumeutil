@@ -4,7 +4,7 @@ mod deuni;
 mod stcm2;
 
 use std::path::PathBuf;
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -26,7 +26,13 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let db = Connection::open(args.file)?;
+    let db = match args.command {
+        Init(_) => Connection::open(args.file)?,
+        _ => Connection::open_with_flags(
+            args.file,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        )?
+    };
 
     use Command::*;
     match args.command {
