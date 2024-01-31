@@ -21,7 +21,7 @@ impl Translator {
             WHERE scriptid = ?1
                 AND ('google', ?1, address) NOT IN
                     (SELECT session, scriptid, address FROM translations)
-        ")?.query_and_then((script,), |row| row.try_into())?.collect::<Result<Vec<(u32, String)>, _>>()?;
+        ")?.query_map((script,), |row| row.try_into())?.collect::<Result<Vec<(u32, String)>, _>>()?;
 
         for chunk in lines.chunks(128) {
             println!("translating {} lines", chunk.len());

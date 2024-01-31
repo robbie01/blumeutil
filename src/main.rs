@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let db = match args.command {
         Init(_) => Connection::open(args.file)?,
+        // open without creating if not init
         _ => Connection::open_with_flags(
             args.file,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_NO_MUTEX

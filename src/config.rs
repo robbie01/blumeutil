@@ -19,10 +19,10 @@ pub fn run(db: Connection, args: Args) -> anyhow::Result<()> {
             }
         },
         Args { name: Some(name), value: None } => {
-            let (value,): (String,) = db.query_row(
+            let value = db.query_row(
                 "SELECT value FROM config WHERE name = ?",
                 (&name,),
-                |row| row.try_into()
+                |row| row.get::<_, String>(0)
             )?;
             println!("{name} = {value}");
         },
