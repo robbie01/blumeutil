@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use rusqlite::Connection;
 use clap::Parser;
 
@@ -9,8 +8,7 @@ pub struct Args {
     value: Option<String>
 }
 
-pub fn run(file: PathBuf, args: Args) -> anyhow::Result<()> {
-    let db = Connection::open(file)?;
+pub fn run(db: Connection, args: Args) -> anyhow::Result<()> {
     match args {
         Args { key: None, value: None } => {
             let mut stmt = db.prepare("SELECT key, value FROM config")?;

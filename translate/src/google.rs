@@ -16,12 +16,12 @@ impl Translator {
 impl Translator {
     pub async fn translate(&mut self, client: Client, db: &mut Connection, script: u32) -> anyhow::Result<()> {
         let lines = db.prepare_cached("
-            SELECT address, speaker, line
+            SELECT address, line
             FROM lines
             WHERE scriptid = ?1
-                AND session = 'original'
-                AND (?1, address, 'google') NOT IN (SELECT scriptid, address, session FROM lines)
-        ")?.query_and_then((script,), |row| row.try_into())?.collect::<Result<Vec<(u32, String, String)>, _>>()?;
+                AND ('google', ?1, address) NOT IN
+                    (SELECT session, scriptid, address FROM translations)
+        ")?.query_and_then((script,), |row| row.try_into())?.collect::<Result<Vec<(u32, String)>, _>>()?;
 
         for chunk in lines.chunks(128) {
             println!("translating {} lines", chunk.len());
@@ -33,7 +33,7 @@ impl Translator {
                 .post("https://translation.googleapis.com/language/translate/v2")
                 .header("X-Goog-Api-Key", &self.0)
                 .json(&json!({
-                    "q": chunk.iter().map(|t| t.2.as_ref()).collect::<Vec<&str>>(),
+                    "q": chunk.iter().map(|(_, l)| l.as_ref()).collect::<Vec<&str>>(),
                     "target": "en",
                     "format": "text",
                     "source": "ja"
@@ -52,14 +52,14 @@ impl Translator {
                 .as_array().context("translations is not array")?;
 
             {
-                let mut stmt = tx.prepare_cached("INSERT INTO lines VALUES(?, ?, 'google', ?, ?)")?;
+                let mut stmt = tx.prepare_cached("INSERT INTO lines VALUES('google', ?, ?, ?)")?;
 
-                for ((addr, speaker, _orig), tl) in iter::zip(chunk, tls) {
+                for ((addr, _orig), tl) in iter::zip(chunk, tls) {
                     // make insertions resilient; try to salvage as much data as possible
                     match tl.pointer("/translatedText").and_then(Value::as_str) {
                         None => eprintln!("warning: script {script} addr {addr} has an invalid or missing translatedText"),
                         Some(line) => {
-                            if let Err(e) = stmt.execute((script, addr, speaker, line)) {
+                            if let Err(e) = stmt.execute((script, addr, line)) {
                                 eprintln!("warning: script {script} addr {addr} failed to save");
                                 eprintln!("line: {line}");
                                 eprintln!("error: {e}");

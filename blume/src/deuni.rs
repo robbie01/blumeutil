@@ -35,7 +35,7 @@ fn validate(mut entries: &[Entry]) -> bool {
     true
 }
 
-pub fn run(db_file: PathBuf, args: Args) -> anyhow::Result<()> {
+pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
     let mut file = BufReader::with_capacity(SECTOR_SIZE as usize, File::open(args.uni)?);
 
     if !file.fill_buf()?.starts_with(UNI2_MAGIC) {
@@ -61,9 +61,6 @@ pub fn run(db_file: PathBuf, args: Args) -> anyhow::Result<()> {
     }
 
     println!("found {n} entries");
-
-    
-    let mut db = Connection::open(db_file)?;
 
     let mut tx = db.transaction()?;
     tx.set_drop_behavior(DropBehavior::Commit);

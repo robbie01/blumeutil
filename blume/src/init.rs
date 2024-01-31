@@ -1,12 +1,10 @@
-use std::path::PathBuf;
 use rusqlite::Connection;
 use clap::Parser;
 
 #[derive(Parser)]
 pub struct Args {}
 
-pub fn run(file: PathBuf, _args: Args) -> anyhow::Result<()> {
-    let mut db = Connection::open(file)?;
+pub fn run(mut db: Connection, _args: Args) -> anyhow::Result<()> {
     let tx = db.transaction()?;
     tx.execute_batch("
         CREATE TABLE config(key TEXT PRIMARY KEY, value ANY) WITHOUT ROWID, STRICT;

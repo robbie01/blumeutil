@@ -3,6 +3,7 @@ mod init;
 mod deuni;
 
 use std::path::PathBuf;
+use rusqlite::Connection;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -23,11 +24,12 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    let db = Connection::open(args.file)?;
 
     use Command::*;
     match args.command {
-        Config(margs) => config::run(args.file, margs),
-        Init(margs) => init::run(args.file, margs),
-        DeUni(margs) => deuni::run(args.file, margs)
+        Config(margs) => config::run(db, margs),
+        Init(margs) => init::run(db, margs),
+        DeUni(margs) => deuni::run(db, margs)
     }
 }
