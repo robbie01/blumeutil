@@ -2,6 +2,7 @@ mod config;
 mod init;
 mod deuni;
 mod stcm2;
+mod translate;
 
 use std::path::PathBuf;
 use rusqlite::{Connection, OpenFlags};
@@ -21,10 +22,12 @@ enum Command {
     Init(init::Args),
     #[command(name = "deuni")]
     DeUni(deuni::Args),
-    Stcm2(stcm2::Args)
+    Stcm2(stcm2::Args),
+    Translate(translate::Args)
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let db = match args.command {
         Init(_) => Connection::open(args.file)?,
@@ -39,6 +42,7 @@ fn main() -> anyhow::Result<()> {
         Config(margs) => config::run(db, margs),
         Init(margs) => init::run(db, margs),
         DeUni(margs) => deuni::run(db, margs),
-        Stcm2(margs) => stcm2::run(db, margs)
+        Stcm2(margs) => stcm2::run(db, margs),
+        Translate(margs) => translate::run(db, margs).await
     }
 }
