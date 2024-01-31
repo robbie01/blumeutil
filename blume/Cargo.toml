@@ -10,3 +10,4 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 rusqlite = { workspace = true }
 byteorder = { workspace = true }
+encoding_rs = { workspace = true }

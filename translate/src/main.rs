@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
         Provider::Google => {
             let mut tl = GoogleTranslator::new(
                 db.query_row(
-                    "SELECT value FROM config WHERE key = 'google_api_key'", (),
+                    "SELECT value FROM config WHERE name = 'google_api_key'", (),
                     |row| <(String,)>::try_from(row)
                 )?.0
             );

@@ -135,6 +135,7 @@ dependencies = [
  "anyhow",
  "byteorder",
  "clap",
+ "encoding_rs",
  "rusqlite",
 ]
 

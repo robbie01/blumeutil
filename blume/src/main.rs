@@ -1,6 +1,7 @@
 mod config;
 mod init;
 mod deuni;
+mod stcm2;
 
 use std::path::PathBuf;
 use rusqlite::Connection;
@@ -19,7 +20,8 @@ enum Command {
     Config(config::Args),
     Init(init::Args),
     #[command(name = "deuni")]
-    DeUni(deuni::Args)
+    DeUni(deuni::Args),
+    Stcm2(stcm2::Args)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -30,6 +32,7 @@ fn main() -> anyhow::Result<()> {
     match args.command {
         Config(margs) => config::run(db, margs),
         Init(margs) => init::run(db, margs),
-        DeUni(margs) => deuni::run(db, margs)
+        DeUni(margs) => deuni::run(db, margs),
+        Stcm2(margs) => stcm2::run(db, margs)
     }
 }

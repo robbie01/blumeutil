@@ -1,5 +1,5 @@
 [workspace]
-members = ["stcm2", "translate", "blume"]
+members = ["translate", "blume"]
 resolver = "2"
 
 [workspace.dependencies]
