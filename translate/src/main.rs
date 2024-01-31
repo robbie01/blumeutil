@@ -3,6 +3,7 @@ mod google;
 //mod llm;
 
 use std::path::PathBuf;
+use anyhow::Context as _;
 use clap::{Parser, ValueEnum};
 use rusqlite::Connection;
 use reqwest::Client;
@@ -33,12 +34,11 @@ async fn main() -> anyhow::Result<()> {
 
     match args.provider {
         Provider::Google => {
-            let mut tl = GoogleTranslator::new(
-                db.query_row(
-                    "SELECT value FROM config WHERE name = 'google_api_key'", (),
-                    |row| <(String,)>::try_from(row)
-                )?.0
-            );
+            let mut tl = GoogleTranslator::new(db.query_row(
+                "SELECT value FROM config WHERE name = 'google_api_key'",
+                (),
+                |row| row.get(0)
+            ).context("no google_api_key configured")?);
             tl.translate(cli.clone(), &mut db, args.script_id).await?;
         },
         Provider::Llm => todo!()
