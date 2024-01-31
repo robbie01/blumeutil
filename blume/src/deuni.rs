@@ -8,11 +8,8 @@ const UNI2_MAGIC: &[u8] = b"UNI2\0\0\x01\0";
 const SECTOR_SIZE: u64 = 0x800;
 
 #[derive(Parser)]
-#[command(author, version)]
-struct Args {
-    #[arg(help = "path to the SQLite database")]
-    db: PathBuf,
-    #[arg(help = "path to the uni file")]
+pub struct Args {
+    #[arg(help = "Path to the uni file")]
     uni: PathBuf
 }
 
@@ -38,9 +35,7 @@ fn validate(mut entries: &[Entry]) -> bool {
     true
 }
 
-fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-
+pub fn run(db_file: PathBuf, args: Args) -> anyhow::Result<()> {
     let mut file = BufReader::with_capacity(SECTOR_SIZE as usize, File::open(args.uni)?);
 
     if !file.fill_buf()?.starts_with(UNI2_MAGIC) {
@@ -68,18 +63,16 @@ fn main() -> anyhow::Result<()> {
     println!("found {n} entries");
 
     
-    let mut db = Connection::open(args.db)?;
+    let mut db = Connection::open(db_file)?;
 
     let mut tx = db.transaction()?;
     tx.set_drop_behavior(DropBehavior::Commit);
 
-    tx.execute("CREATE TABLE IF NOT EXISTS script(id INTEGER PRIMARY KEY, data BLOB NOT NULL) STRICT", ())?;
-
     for Entry { id, start_sect, size, .. } in entries {
         let sp = tx.savepoint()?;
-        sp.execute("INSERT OR REPLACE INTO script VALUES(?, ?)", (id, ZeroBlob(size.try_into()?)))?;
+        sp.execute("INSERT INTO scripts VALUES(?, ?)", (id, ZeroBlob(size.try_into()?)))?;
 
-        let mut blob = sp.blob_open(DatabaseName::Main, "script", "data", id.into(), false)?;
+        let mut blob = sp.blob_open(DatabaseName::Main, "scripts", "script", id.into(), false)?;
 
         file.seek(SeekFrom::Start((data_sect+start_sect)*SECTOR_SIZE))?;
 

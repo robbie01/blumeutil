@@ -1,5 +1,5 @@
 [workspace]
-members = ["unitool", "stcm2", "translate"]
+members = ["stcm2", "translate", "blume"]
 resolver = "2"
 
 [workspace.dependencies]

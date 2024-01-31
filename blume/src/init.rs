@@ -1,0 +1,32 @@
+use std::path::PathBuf;
+use rusqlite::Connection;
+use clap::Parser;
+
+#[derive(Parser)]
+pub struct Args {}
+
+pub fn run(file: PathBuf, _args: Args) -> anyhow::Result<()> {
+    let mut db = Connection::open(file)?;
+    let tx = db.transaction()?;
+    tx.execute_batch("
+        CREATE TABLE config(key TEXT PRIMARY KEY, value ANY) WITHOUT ROWID, STRICT;
+        CREATE TABLE scripts(id INTEGER PRIMARY KEY, script BLOB NOT NULL) STRICT;
+        CREATE TABLE lines(
+            scriptid INTEGER REFERENCES script(id),
+            address INTEGER,
+            speaker TEXT NOT NULL,
+            line TEXT NOT NULL,
+            PRIMARY KEY(scriptid, address)
+        ) WITHOUT ROWID, STRICT;
+        CREATE TABLE translations(
+            session TEXT,
+            scriptid INTEGER,
+            address INTEGER,
+            translation TEXT NOT NULL,
+            FOREIGN KEY(scriptid, address) REFERENCES lines(scriptid, address),
+            PRIMARY KEY(session, scriptid, address)
+        ) WITHOUT ROWID, STRICT;
+    ")?;
+    tx.commit()?;
+    Ok(())
+}
