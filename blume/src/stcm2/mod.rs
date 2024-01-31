@@ -3,7 +3,7 @@ mod dict;
 
 use std::{collections::HashMap, io::{BufReader, SeekFrom, ErrorKind, Read as _, Seek as _, BufRead as _}};
 use anyhow::{bail, ensure, anyhow};
-use clap::{Parser, Args as ClapArgs};
+use clap::Parser;
 use byteorder::{LittleEndian as LE, ReadBytesExt as _};
 use encoding_rs::SHIFT_JIS;
 use rusqlite::{Connection, DatabaseName, DropBehavior};
