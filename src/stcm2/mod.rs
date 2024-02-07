@@ -1,10 +1,10 @@
 mod parse;
 mod dict;
 
-use std::{collections::HashMap, io::{BufReader, SeekFrom, ErrorKind, Read as _, Seek as _, BufRead as _}};
+use std::io;
 use anyhow::{bail, ensure, anyhow};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use clap::Parser;
-use byteorder::{LittleEndian as LE, ReadBytesExt as _};
 use encoding_rs::SHIFT_JIS;
 use rusqlite::{Connection, DatabaseName, DropBehavior};
 
@@ -17,35 +17,37 @@ pub struct Args {
     #[arg(short, help = "analyze all scripts", group = "script")]
     all: bool,
     #[arg(help = "ids of scripts to analyze", group = "script")]
-    id: Vec<u32>
+    id: Vec<u32>,
+    #[arg(from_global)]
+    dry_run: bool
 }
 
-#[derive(Clone, Copy)]
-pub enum Operation<'a> {
-    Speaker(u32, &'a [u8]),
-    Line(u32, &'a [u8]),
-    Choice(u32, u32, &'a [u8]),
+#[derive(Clone)]
+pub enum Operation {
+    Speaker(u32, Bytes),
+    Line(u32, Bytes),
+    Choice(u32, u32, Bytes),
     Yield(u32),
-    Raw(&'a Action)
+    Unknown(Action)
 }
 
-impl std::fmt::Debug for Operation<'_> {
+impl std::fmt::Debug for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Operation::*;
 
         match *self {
             Yield(ref addr) => f.debug_tuple("Yield").field(addr).finish(),
-            Speaker(ref addr, s) => f.debug_tuple("Speaker").field(addr).field(&SHIFT_JIS.decode_without_bom_handling(s).0).finish(),
-            Line(ref addr, s) => f.debug_tuple("Line").field(addr).field(&SHIFT_JIS.decode_without_bom_handling(s).0).finish(),
-            Choice(ref addr, ref i, s) => f.debug_tuple("Choice").field(addr).field(i).field(&SHIFT_JIS.decode_without_bom_handling(s).0).finish(),
-            Raw(act) => f.debug_tuple("Raw").field(act).finish()
+            Speaker(ref addr, ref s) => f.debug_tuple("Speaker").field(addr).field(&SHIFT_JIS.decode_without_bom_handling(s).0).finish(),
+            Line(ref addr, ref s) => f.debug_tuple("Line").field(addr).field(&SHIFT_JIS.decode_without_bom_handling(s).0).finish(),
+            Choice(ref addr, ref i, ref s) => f.debug_tuple("Choice").field(addr).field(i).field(&SHIFT_JIS.decode_without_bom_handling(s).0).finish(),
+            Unknown(ref act) => f.debug_tuple("Unknown").field(act).finish()
         }
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Export {
-    name: [u8; 32],
+    name: Bytes,
     addr: u64
 }
 
@@ -71,26 +73,30 @@ impl Parameter {
 pub struct Action {
     addr: u32,
     #[allow(unused)]
-    export: Option<[u8; 32]>,
+    export: Option<Bytes>,
     call: bool,
     opcode: u32,
     params: Vec<Parameter>,
-    data: Vec<u8>
+    data: Bytes
 }
 
-fn decode_string(mut str: &[u8]) -> anyhow::Result<&[u8]> {
-    if str.read_u32::<LE>()? != 0 { bail!("string magic isn't 0"); }
-    let qlen = str.read_u32::<LE>()?;
-    if str.read_u32::<LE>()? != 1 { bail!("string magic isn't 1"); }
-    let len = str.read_u32::<LE>()?;
+fn decode_string(addr: u32, mut str: Bytes) -> anyhow::Result<(Bytes, Bytes, Bytes)> {
+    let init = str.split_to(addr as usize);
+
+    if str.get_u32_le() != 0 { bail!("string magic isn't 0"); }
+    let qlen = str.get_u32_le();
+    if str.get_u32_le() != 1 { bail!("string magic isn't 1"); }
+    let len = str.get_u32_le();
     if len/4 != qlen { bail!("len and qlen are inconsistent: len = {len}, qlen = {qlen}"); }
 
-    str = &str[..len.try_into()?];
+    let tail = str.split_off(len.try_into()?);
 
     // clip zeros off end
-    while let &[ref rest @ .., 0] = str { str = rest }
+    while let Some(0) = str.last() {
+        str.truncate(str.len()-1);
+    }
     
-    Ok(str)
+    Ok((init, str, tail))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -110,26 +116,26 @@ impl Action {
     const OP_YIELD: u32 = 0xd3;
     const OP_CHOICE: u32 = 0xe7;
     
-    fn op(&self) -> anyhow::Result<Operation<'_>> {
-        match *self {
-            Action { call: true, .. } => Ok(Operation::Raw(self)),
+    fn op(self) -> anyhow::Result<Operation> {
+        match self {
+            Action { call: true, .. } => Ok(Operation::Unknown(self)),
             Action { opcode: Self::OP_SPEAKER, ref params, ref data, .. } => {
                 let &[Parameter::LocalPointer(addr)] = &params[..] else { bail!("bad speaker: params = {params:08X?}"); };
-                Ok(Operation::Speaker(self.addr, decode_string(&data[addr as usize..])?))
+                Ok(Operation::Speaker(self.addr, decode_string(addr, data.clone())?.1))
             }
             Action { opcode: Self::OP_LINE, ref params, ref data, .. } => {
                 let &[Parameter::LocalPointer(addr)] = &params[..] else { bail!("bad line: params = {params:08X?}"); };
-                Ok(Operation::Line(self.addr, decode_string(&data[addr as usize..])?))
+                Ok(Operation::Line(self.addr, decode_string(addr, data.clone())?.1))
             },
             Action { opcode: Self::OP_CHOICE, ref params, ref data, .. } => {
                 let &[Parameter::LocalPointer(addr), Parameter::Value(i)] = &params[..] else { bail!("bad choice: params = {params:08X?}"); };
-                Ok(Operation::Choice(self.addr, i, decode_string(&data[addr as usize..])?))
+                Ok(Operation::Choice(self.addr, i, decode_string(addr, data.clone())?.1))
             },
             Action { opcode: Self::OP_YIELD, ref params, ref data, .. } => {
                 ensure!(params.is_empty() && data.is_empty(), "bad line end");
                 Ok(Operation::Yield(self.addr))
             }
-            _ => Ok(Operation::Raw(self))
+            _ => Ok(Operation::Unknown(self))
         }
     }
 }
@@ -146,95 +152,111 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
     };
     drop(stmt);
 
-    let mut stmt = tx.prepare("INSERT INTO lines VALUES(?, ?, ?, ?)")?;
+    let mut stmt = tx.prepare("INSERT OR IGNORE INTO lines(scriptid, address, speaker, line) VALUES(?, ?, ?, ?)")?;
 
     for script_id in scripts {
-    let mut file = BufReader::with_capacity(0x2000, tx.blob_open(DatabaseName::Main, "scripts", "script", script_id.into(), true)?);
+        let mut file = BytesMut::new().writer();
+        io::copy(
+            &mut tx.blob_open(DatabaseName::Main, "scripts", "script", script_id.into(), true)?,
+            &mut file
+        )?;
+        let file = file.into_inner().freeze();
 
-    if !file.fill_buf()?.starts_with(STCM2_MAGIC) {
-        bail!("bad magic");
-    }
-    file.consume(STCM2_MAGIC.len());
-
-    let export_addr = file.read_u32::<LE>()? as u64;
-
-    file.seek(SeekFrom::Start(export_addr))?;
-
-    let mut exports = Vec::new();
-
-    let mut buffer = [0; 32];
-    loop {
-        ensure!(file.read_u32::<LE>()? == 0, "export does not begin with 0");
-        match file.read_exact(&mut buffer) {
-            Err(err) if err.kind() == ErrorKind::UnexpectedEof => break,
-            x => x
-        }?;
-        exports.push(Export { name: buffer, addr: file.read_u32::<LE>()?.into() });
-    }
-
-    file.rewind()?;
-
-    // CODE_START_ will be 16-byte aligned
-    while !file.fill_buf()?.starts_with(CODE_START_MAGIC) {
-        file.consume(16);
-    }
-    file.consume(CODE_START_MAGIC.len());
-
-    let mut actions = Vec::new();
-    loop {
-        let addr = file.stream_position()? as u32;
-        
-        let global_call = file.read_u32::<LE>()?;
-        let opcode = file.read_u32::<LE>()?;
-        let nparams = file.read_u32::<LE>()?;
-        let length = file.read_u32::<LE>()?;
-
-        if length == 0 { break; }
-
-        let call = match global_call {
-            0 => false,
-            1 => true,
-            v => bail!("global_call = {v:08X}")
+        let export_addr = {
+            let mut file = file.clone();
+            if !file.starts_with(STCM2_MAGIC) {
+                bail!("bad magic");
+            }
+            file.advance(STCM2_MAGIC.len());
+            file.get_u32_le() as usize
         };
-        let mut params = Vec::with_capacity(nparams as usize);
-        for _ in 0..nparams {
-            let mut buffer = [0; 3];
-            file.read_u32_into::<LE>(&mut buffer)?;
-            params.push(Parameter::parse(buffer, addr + 16 + 12*nparams, length - 16 - 12*nparams)?);
+
+        let mut exports = {
+            let mut file = file.clone();
+            file.advance(export_addr);
+
+            let mut exports = Vec::new();
+
+            loop {
+                ensure!(file.get_u32_le() == 0, "export does not begin with 0");
+                if file.len() < 32 { break }
+                exports.push(Export { name: file.split_to(32), addr: file.get_u32_le().into() });
+            }
+
+            exports
+        };
+
+        let mut file = file;
+        let mut pos = 0;
+
+        // CODE_START_ will be 16-byte aligned
+        while !file.starts_with(CODE_START_MAGIC) {
+            file.advance(16);
+            pos += 16;
+        }
+        file.advance(CODE_START_MAGIC.len());
+        pos += CODE_START_MAGIC.len();
+
+        let mut actions = Vec::new();
+        loop {
+            let addr = pos as u32;
+            
+            let global_call = file.get_u32_le();
+            let opcode = file.get_u32_le();
+            let nparams = file.get_u32_le();
+            let length = file.get_u32_le();
+            pos += 16;
+
+            if length == 0 { break; }
+
+            let call = match global_call {
+                0 => false,
+                1 => true,
+                v => bail!("global_call = {v:08X}")
+            };
+            let mut params = Vec::with_capacity(nparams as usize);
+            for _ in 0..nparams {
+                let buffer = [file.get_u32_le(), file.get_u32_le(), file.get_u32_le()];
+                pos += 12;
+                params.push(Parameter::parse(buffer, addr + 16 + 12*nparams, length - 16 - 12*nparams)?);
+            }
+
+            let ndata = length - 16 - 12*nparams;
+            let data = file.split_to(ndata as usize);
+            pos += ndata as usize;
+
+            let export = exports.iter().position(|e| e.addr == u64::from(addr)).map(|i| exports.swap_remove(i).name);
+
+            actions.push(Action { addr, export, call, opcode, params, data });
         }
 
-        let mut data = Vec::new();
-        let ndata = length - 16 - 12*nparams;
-        if ndata > 0 {
-            data.resize(ndata as usize, 0);
-            file.read_exact(&mut data)?;
+        ensure!(exports.is_empty(), "exports left over!");
+
+        let parsed = parse::parse(actions.into_iter().filter_map(|act| act.op().ok()))?;
+
+        let mut n = 0;
+        for d in parsed {
+            if let parse::Dialogue::Line { addr, speaker, line } = d {
+                if let Some(speaker) = dict::SPEAKERS.get(&speaker.as_deref()) {
+                stmt.execute((script_id, addr, speaker, &line))?;
+                } else {
+                bail!("add {speaker:?} to speakers");
+
+                }
+            } else if let parse::Dialogue::Choice { .. } = d {
+                n += 1;
+            }
         }
-
-        let export = exports.iter().position(|e| e.addr == u64::from(addr)).map(|i| exports.swap_remove(i).name);
-
-        actions.push(Action { addr, export, call, opcode, params, data });
-    }
-    file.into_inner().close()?;
-
-    ensure!(exports.is_empty(), "exports left over!");
-
-    let parsed = parse::parse(actions.iter().filter_map(|act| act.op().ok()));
-
-    let speakers = HashMap::<Option<&str>, &str>::from(dict::SPEAKERS);
-
-    let mut n = 0;
-    for d in parsed {
-        if let parse::Dialogue::Line { addr, speaker, line } = d {
-            stmt.execute((script_id, addr, speakers.get(&speaker.as_deref()).unwrap(), &line))?;
-        } else if let parse::Dialogue::Choice { .. } = d {
-            n += 1;
-        }
-    }
-    println!("found {n} choices");
+        println!("found {n} choices");
     }
 
     drop(stmt);
-    tx.commit()?;
+
+    if args.dry_run {
+        tx.rollback()?;
+    } else {
+        tx.commit()?;
+    }
 
     Ok(())
 }

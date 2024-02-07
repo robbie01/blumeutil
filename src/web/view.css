@@ -1,0 +1,20 @@
+table, th, td {
+    border: 1px solid black;
+}
+
+th, td {
+    padding: 5px;
+}
+
+form {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+form > .current {
+    width: 100%;
+}
+
+form > input {
+    flex: 1;
+}

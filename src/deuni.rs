@@ -2,7 +2,7 @@ use std::{path::PathBuf, fs::File, iter, io::{self, BufReader, SeekFrom, Read as
 use anyhow::bail;
 use clap::Parser;
 use byteorder::{LittleEndian as LE, ReadBytesExt as _};
-use rusqlite::{blob::ZeroBlob, Connection, DatabaseName, DropBehavior};
+use rusqlite::{blob::ZeroBlob, Connection, DatabaseName};
 
 const UNI2_MAGIC: &[u8] = b"UNI2\0\0\x01\0";
 const SECTOR_SIZE: u64 = 0x800;
@@ -62,14 +62,13 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
 
     println!("found {n} entries");
 
-    let mut tx = db.transaction()?;
-    tx.set_drop_behavior(DropBehavior::Commit);
+    let tx = db.transaction()?;
+    let mut stmt = tx.prepare("INSERT INTO scripts(id, script) VALUES(?, ?)")?;
 
     for Entry { id, start_sect, size, .. } in entries {
-        let sp = tx.savepoint()?;
-        sp.execute("INSERT INTO scripts VALUES(?, ?)", (id, ZeroBlob(size.try_into()?)))?;
+        stmt.execute((id, ZeroBlob(size.try_into()?)))?;
 
-        let mut blob = sp.blob_open(DatabaseName::Main, "scripts", "script", id.into(), false)?;
+        let mut blob = tx.blob_open(DatabaseName::Main, "scripts", "script", id.into(), false)?;
 
         file.seek(SeekFrom::Start((data_sect+start_sect)*SECTOR_SIZE))?;
 
@@ -78,11 +77,9 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
         }
 
         blob.close()?;
-        sp.commit()?;
-
-        println!("copied {id:X}; {size} bytes");
     }
 
+    drop(stmt);
     tx.commit()?;
 
     Ok(())

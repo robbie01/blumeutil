@@ -14,7 +14,7 @@ impl Translator {
 }
 
 impl Translator {
-    pub async fn translate(&mut self, client: Client, db: &mut Connection, script: u32) -> anyhow::Result<()> {
+    pub async fn translate(&self, client: Client, db: &mut Connection, script: u32) -> anyhow::Result<()> {
         let lines = db.prepare_cached("
             SELECT address, line
             FROM lines
@@ -52,16 +52,16 @@ impl Translator {
                 .as_array().context("translations is not array")?;
 
             {
-                let mut stmt = tx.prepare_cached("INSERT INTO lines VALUES('google', ?, ?, ?)")?;
+                let mut stmt = tx.prepare_cached("INSERT INTO translations(session, scriptid, address, translation) VALUES('google', ?, ?, ?)")?;
 
                 for ((addr, _orig), tl) in iter::zip(chunk, tls) {
                     // make insertions resilient; try to salvage as much data as possible
                     match tl.pointer("/translatedText").and_then(Value::as_str) {
                         None => eprintln!("warning: script {script} addr {addr} has an invalid or missing translatedText"),
-                        Some(line) => {
-                            if let Err(e) = stmt.execute((script, addr, line)) {
+                        Some(tl) => {
+                            if let Err(e) = stmt.execute((script, addr, tl)) {
                                 eprintln!("warning: script {script} addr {addr} failed to save");
-                                eprintln!("line: {line}");
+                                eprintln!("tl: {tl}");
                                 eprintln!("error: {e}");
                             }
                         }

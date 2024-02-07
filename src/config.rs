@@ -27,7 +27,7 @@ pub fn run(db: Connection, args: Args) -> anyhow::Result<()> {
             println!("{name} = {value}");
         },
         Args { name: Some(name), value: Some(value) } => {
-            db.execute("INSERT OR REPLACE INTO config VALUES(?, ?)", (name, value))?;
+            db.execute("INSERT OR REPLACE INTO config(name, value) VALUES(?, ?)", (name, value))?;
         },
         _ => unreachable!()
     }

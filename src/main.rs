@@ -1,8 +1,13 @@
+#![recursion_limit = "512"]
+
 mod config;
 mod init;
 mod deuni;
 mod stcm2;
 mod translate;
+mod web;
+mod cleanup;
+mod checkpunct;
 
 use std::path::PathBuf;
 use rusqlite::{Connection, OpenFlags};
@@ -12,6 +17,8 @@ use clap::{Parser, Subcommand};
 struct Args {
     #[arg(short, help = "Path to the blume working database file")]
     file: PathBuf,
+    #[arg(short = 'n', global = true, help = "don't actually write to the database")]
+    dry_run: bool,
     #[command(subcommand)]
     command: Command
 }
@@ -23,12 +30,18 @@ enum Command {
     #[command(name = "deuni")]
     DeUni(deuni::Args),
     Stcm2(stcm2::Args),
-    Translate(translate::Args)
+    Translate(translate::Args),
+    Web(web::Args),
+    Cleanup(cleanup::Args),
+    Checkpunct(checkpunct::Args)
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    
+    tracing_subscriber::fmt::init();
+
     let db = match args.command {
         Init(_) => Connection::open(args.file)?,
         // open without creating if not init
@@ -44,6 +57,9 @@ async fn main() -> anyhow::Result<()> {
         Init(margs) => init::run(db, margs),
         DeUni(margs) => deuni::run(db, margs),
         Stcm2(margs) => stcm2::run(db, margs),
-        Translate(margs) => translate::run(db, margs).await
+        Translate(margs) => translate::run(db, margs).await,
+        Web(margs) => web::run(db, margs).await,
+        Cleanup(margs) => cleanup::run(db, margs),
+        Checkpunct(margs) => checkpunct::run(db, margs)
     }
 }

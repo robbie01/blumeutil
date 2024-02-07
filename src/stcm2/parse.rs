@@ -1,8 +1,6 @@
-use std::borrow::Cow;
-
 use super::Operation;
+use anyhow::ensure;
 use encoding_rs::SHIFT_JIS;
-// use xml::{EventWriter, writer::XmlEvent};
 
 #[derive(Clone, Debug)]
 pub enum Dialogue {
@@ -19,14 +17,14 @@ pub enum Dialogue {
 }
 
 #[derive(Clone, Debug, Default)]
-struct ParseState<'a> {
+struct ParseState {
     addr: Option<u32>,
     speaker: String,
-    options: Vec<Cow<'a, str>>,
+    options: Vec<String>,
     line: String
 }
 
-impl ParseState<'_> {
+impl ParseState {
     fn clear(&mut self) {
         self.addr = None;
         self.speaker.clear();
@@ -39,7 +37,11 @@ fn trim(s: &str) -> &str {
     s.trim_matches(|c: char| c.is_whitespace() || c == '・')
 }
 
-pub fn parse<'a>(it: impl IntoIterator<Item = Operation<'a>>) -> Vec<Dialogue> {
+fn decode(b: &[u8]) -> String {
+    SHIFT_JIS.decode_without_bom_handling(b).0.into_owned()
+}
+
+pub fn parse(it: impl IntoIterator<Item = Operation>) -> anyhow::Result<Vec<Dialogue>> {
     use Operation::*;
 
     let mut st = ParseState::default();
@@ -48,24 +50,24 @@ pub fn parse<'a>(it: impl IntoIterator<Item = Operation<'a>>) -> Vec<Dialogue> {
         match op {
             Line(addr, s) => {
                 if st.addr.is_none() { st.addr = Some(addr); }
-                st.line.push_str(trim(&SHIFT_JIS.decode_without_bom_handling(s).0));
+                st.line.push_str(trim(&decode(&s)));
             },
             Choice(_addr, _, s) => {
-                assert!(st.addr.is_some() && st.speaker.is_empty() && !st.line.is_empty(), "st = {st:#X?}");
-                st.options.push(SHIFT_JIS.decode_without_bom_handling(s).0);
+                ensure!(st.addr.is_some() && !st.line.is_empty(), "st = {st:#X?}");
+                st.options.push(decode(&s));
             },
             Speaker(addr, s) => {
-                assert!(st.speaker.is_empty() && st.options.is_empty(), "st = {st:#X?}");
+                ensure!(st.speaker.is_empty() && st.options.is_empty(), "st = {st:#X?}");
                 if st.addr.is_none() { st.addr = Some(addr); }
-                st.speaker.push_str(&SHIFT_JIS.decode_without_bom_handling(s).0);
+                st.speaker.push_str(&decode(&s));
             },
             _ => {
                 if st.line.is_empty() {}
                 else if !st.options.is_empty() {
-                    assert!(st.addr.is_some() && st.speaker.is_empty(), "st = {st:#X?}");
-                    di.push(Dialogue::Choice { addr: st.addr.unwrap(), prompt: st.line.clone(), options: st.options.iter().map(|s| s.clone().into_owned()).collect() })
+                    ensure!(st.addr.is_some(), "st = {st:#X?}");
+                    di.push(Dialogue::Choice { addr: st.addr.unwrap(), prompt: st.line.clone(), options: st.options.iter().map(|s| s.clone()).collect() })
                 } else {
-                    assert!(st.addr.is_some() && st.options.is_empty(), "st = {st:#X?}");
+                    ensure!(st.addr.is_some() && st.options.is_empty(), "st = {st:#X?}");
                     di.push(Dialogue::Line { addr: st.addr.unwrap(), speaker: (!st.speaker.is_empty()).then(|| st.speaker.clone()), line: st.line.clone() })
                 }
                 st.clear();
@@ -73,47 +75,5 @@ pub fn parse<'a>(it: impl IntoIterator<Item = Operation<'a>>) -> Vec<Dialogue> {
         }
     }
 
-    di
+    Ok(di)
 }
-
-// #[allow(unused)]
-// pub fn to_xml(writer: &mut EventWriter<impl Write>, it: impl IntoIterator<Item = Dialogue>) -> anyhow::Result<()> {
-//     use Dialogue::*;
-//     let mut buf = String::new();
-//     writer.write(XmlEvent::start_element("scene").attr("id", "00000064"))?;
-//     for d in it {
-//         match d {
-//             Choice { addr, prompt, options } => {
-//                 buf.clear();
-//                 write!(buf, "{addr:X}")?;
-//                 writer.write(XmlEvent::start_element("choice").attr("addr", &buf))?;
-//                 writer.write(XmlEvent::start_element("prompt"))?;
-//                 writer.write(XmlEvent::characters(&prompt))?;
-//                 writer.write(XmlEvent::end_element())?;
-//                 for opt in options {
-//                     writer.write(XmlEvent::start_element("option"))?;
-//                     writer.write(XmlEvent::characters(&opt))?;
-//                     writer.write(XmlEvent::end_element())?;
-//                 }
-//                 writer.write(XmlEvent::end_element())?;
-//             },
-//             Line { addr, speaker, line } => {
-//                 buf.clear();
-//                 write!(buf, "{addr:X}")?;
-//                 writer.write(XmlEvent::start_element("line").attr("addr", &buf))?;
-//                 if let Some(speaker) = speaker {
-//                     writer.write(XmlEvent::start_element("speaker"))?;
-//                     writer.write(XmlEvent::characters(&speaker))?;
-//                     writer.write(XmlEvent::end_element())?;
-//                 }
-//                 writer.write(XmlEvent::start_element("dialogue"))?;
-//                 writer.write(XmlEvent::characters(&line))?;
-//                 writer.write(XmlEvent::end_element())?;
-//                 writer.write(XmlEvent::end_element())?;
-//             }
-//         }
-//     }
-//     writer.write(XmlEvent::end_element())?;
-
-//     Ok(())
-// }
