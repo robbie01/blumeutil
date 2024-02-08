@@ -53,13 +53,21 @@ impl Model {
         Ok(rows)
     }
 
-    pub fn update_translation(&self, session: &str, scriptid: u32, address: u32, translation: &str) -> rusqlite::Result<String> {
+    pub fn translation(&self, session: &str, scriptid: u32, address: u32, update: Option<&str>) -> rusqlite::Result<String> {
         let db = self.db.lock().unwrap();
 
-        db.query_row(
-            "INSERT OR REPLACE INTO translations(session, scriptid, address, translation) VALUES (?, ?, ?, TRIM(?)) RETURNING translation",
-            (session, scriptid, address, translation),
-            |row| row.get(0)
-        )
+        if let Some(translation) = update {
+            db.query_row(
+                "INSERT OR REPLACE INTO translations(session, scriptid, address, translation) VALUES (?, ?, ?, TRIM(?)) RETURNING translation",
+                (session, scriptid, address, translation),
+                |row| row.get(0)
+            )
+        } else {
+            db.query_row(
+                "SELECT translation FROM translations WHERE session = ? AND scriptid = ? AND address = ?",
+                (session, scriptid, address),
+                |row| row.get(0)
+            )
+        }
     }
 }

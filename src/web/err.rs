@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{convert::Infallible, fmt::Display};
 use axum::http::StatusCode;
 
 pub trait ResultExt<T, E> {
@@ -13,5 +13,15 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
 
     fn with_ise_msg(self, msg: &'static str) -> axum::response::Result<T> {
         self.or(Err((StatusCode::INTERNAL_SERVER_ERROR, msg).into()))
+    }
+}
+
+impl<T> ResultExt<T, Infallible> for Option<T> {
+    fn with_ise(self) -> axum::response::Result<T> where Infallible: Display {
+        unreachable!()
+    }
+
+    fn with_ise_msg(self, msg: &'static str) -> axum::response::Result<T> {
+        self.ok_or((StatusCode::INTERNAL_SERVER_ERROR, msg).into())
     }
 }

@@ -6,15 +6,11 @@ th, td {
     padding: 5px;
 }
 
-form {
+.current {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
 }
 
-form > .current {
-    width: 100%;
-}
-
-form > input {
+.current > :first-child {
     flex: 1;
 }

@@ -1,5 +1,4 @@
 mod parse;
-mod dict;
 
 use std::io;
 use anyhow::{bail, ensure, anyhow};
@@ -144,18 +143,24 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
     let mut tx = db.transaction()?;
     tx.set_drop_behavior(DropBehavior::Commit);
 
-    let mut stmt = tx.prepare("SELECT id FROM scripts")?;
     let scripts = if args.all {
-        stmt.query_map((), |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?
+        let mut stmt = tx.prepare("SELECT id, LENGTH(script) FROM scripts WHERE id >= 100")?;
+        let scripts = stmt.query_map((), |row| <(u32, usize)>::try_from(row))?.collect::<Result<Vec<_>, _>>()?;
+        scripts
     } else {
-        args.id
+        let mut stmt = tx.prepare(&format!(
+            "SELECT id, LENGTH(script) FROM scripts WHERE id IN ({})",
+            vec!["?"; args.id.len()].join(", ")
+        ))?;
+        let scripts = stmt.query_map(rusqlite::params_from_iter(args.id), |row| <(u32, usize)>::try_from(row))?.collect::<Result<Vec<_>, _>>()?;
+        scripts
     };
-    drop(stmt);
 
     let mut stmt = tx.prepare("INSERT OR IGNORE INTO lines(scriptid, address, speaker, line) VALUES(?, ?, ?, ?)")?;
 
-    for script_id in scripts {
-        let mut file = BytesMut::new().writer();
+    for (script_id, script_size) in scripts {
+        println!("Processing script {script_id}");
+        let mut file = BytesMut::with_capacity(script_size).writer();
         io::copy(
             &mut tx.blob_open(DatabaseName::Main, "scripts", "script", script_id.into(), true)?,
             &mut file
@@ -178,8 +183,8 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
             let mut exports = Vec::new();
 
             loop {
+                if file.len() < 40 { break }
                 ensure!(file.get_u32_le() == 0, "export does not begin with 0");
-                if file.len() < 32 { break }
                 exports.push(Export { name: file.split_to(32), addr: file.get_u32_le().into() });
             }
 
@@ -207,7 +212,7 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
             let length = file.get_u32_le();
             pos += 16;
 
-            if length == 0 { break; }
+            if length == 0 { break }
 
             let call = match global_call {
                 0 => false,
@@ -225,7 +230,9 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
             let data = file.split_to(ndata as usize);
             pos += ndata as usize;
 
-            let export = exports.iter().position(|e| e.addr == u64::from(addr)).map(|i| exports.swap_remove(i).name);
+            let export = exports.iter()
+                .position(|e| e.addr == u64::from(addr))
+                .map(|i| exports.swap_remove(i).name);
 
             actions.push(Action { addr, export, call, opcode, params, data });
         }
@@ -237,12 +244,7 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
         let mut n = 0;
         for d in parsed {
             if let parse::Dialogue::Line { addr, speaker, line } = d {
-                if let Some(speaker) = dict::SPEAKERS.get(&speaker.as_deref()) {
-                stmt.execute((script_id, addr, speaker, &line))?;
-                } else {
-                bail!("add {speaker:?} to speakers");
-
-                }
+                stmt.execute((script_id, addr, speaker, line))?;
             } else if let parse::Dialogue::Choice { .. } = d {
                 n += 1;
             }

@@ -1,7 +1,6 @@
 use std::{path::PathBuf, fs::File, iter, io::{self, BufReader, SeekFrom, Read as _, Seek as _, BufRead as _}};
 use anyhow::bail;
 use clap::Parser;
-use byteorder::{LittleEndian as LE, ReadBytesExt as _};
 use rusqlite::{blob::ZeroBlob, Connection, DatabaseName};
 
 const UNI2_MAGIC: &[u8] = b"UNI2\0\0\x01\0";
@@ -35,6 +34,26 @@ fn validate(mut entries: &[Entry]) -> bool {
     true
 }
 
+fn read_u32_le(mut r: impl io::Read) -> io::Result<u32> {
+    let mut buf = [0; 4];
+    r.read_exact(&mut buf)?;
+    Ok(u32::from_le_bytes(buf))
+}
+
+fn read_u32_le_into(mut r: impl io::Read, buf: &mut [u32]) -> io::Result<()> {
+    {
+        let ([], buf, []) = (unsafe { buf.align_to_mut() }) else { unreachable!() };
+        r.read_exact(buf)?;
+    }
+
+    for x in buf.iter_mut() {
+        // read: perform byte swapping on big endian only
+        *x = x.to_le();
+    }
+
+    Ok(())
+}
+
 pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
     let mut file = BufReader::with_capacity(SECTOR_SIZE as usize, File::open(args.uni)?);
 
@@ -43,15 +62,15 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
     }
     file.consume(UNI2_MAGIC.len());
 
-    let n = file.read_u32::<LE>()? as usize;
-    let table_sect = file.read_u32::<LE>()? as u64;
-    let data_sect = file.read_u32::<LE>()? as u64;
+    let n = read_u32_le(&mut file)? as usize;
+    let table_sect = read_u32_le(&mut file)? as u64;
+    let data_sect = read_u32_le(&mut file)? as u64;
 
     file.seek(SeekFrom::Start(table_sect*SECTOR_SIZE))?;
 
     let entries = iter::repeat_with(|| {
         let mut buffer = [0; 4];
-        file.read_u32_into::<LE>(&mut buffer)?;
+        read_u32_le_into(&mut file, &mut buffer)?;
         let [id, start_sect, size_sect, size] = buffer;
         Ok(Entry { id, start_sect: start_sect.into(), size_sect: size_sect.into(), size: size.into() })
     }).take(n).collect::<anyhow::Result<Vec<Entry>>>()?;

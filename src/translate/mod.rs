@@ -1,7 +1,5 @@
 mod google;
-//mod googlefree;
 mod llm;
-mod nllb;
 
 use anyhow::Context as _;
 use clap::{Parser, ValueEnum};
@@ -15,8 +13,7 @@ use llm::Translator as LlmTramslator;
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum Provider {
     Google,
-    Llm,
-    NllbNoContext
+    Llm
 }
 
 #[derive(Parser)]
@@ -26,10 +23,9 @@ pub struct Args {
 }
 
 pub async fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
-    let cli = Client::new();
-
     match args.provider {
         Provider::Google => {
+            let cli = Client::new();
             let tl = GoogleTranslator::new(db.query_row(
                 "SELECT value FROM config WHERE name = 'google_api_key'",
                 (),
@@ -39,11 +35,7 @@ pub async fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
         },
         Provider::Llm => {
             let tl = LlmTramslator::new("llm-20240201".to_owned());
-            tl.translate(cli, &mut db, args.script_id).await?;
-        },
-        Provider::NllbNoContext => {
-            let tl = nllb::nocontext::Translator::new("nllb-nocontext".to_owned());
-            tl.translate(&mut db, args.script_id)?;
+            tl.translate(&mut db, args.script_id).await?;
         }
     }
 

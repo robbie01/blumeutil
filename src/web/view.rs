@@ -1,11 +1,12 @@
 use std::fmt::Display;
-use html::{forms::children::FormChild, scripting::Script, tables::TableRow, text_content::Division};
+use html::{scripting::Script, tables::{children::TableRowChild, TableCell, TableRow}};
 use super::Row;
 
-pub type UpdateCurrent = Box<dyn Fn(&str, u32, u32) -> String + Send + Sync>;
+pub type CurrentUrlGenerator = Box<dyn Fn(&str, u32, u32) -> String + Send + Sync>;
 
 pub struct View {
-    update_current: UpdateCurrent
+    current: CurrentUrlGenerator,
+    edit_current: CurrentUrlGenerator
 }
 
 fn htmx() -> Script {
@@ -18,18 +19,51 @@ fn htmx() -> Script {
 }
 
 impl View {
-    pub fn new(update_current: impl Fn(&str, u32, u32) -> String + Send + Sync + 'static) -> Self {
-        Self { update_current: Box::new(update_current) }
+    pub fn new(
+        current: impl Fn(&str, u32, u32) -> String + Send + Sync + 'static,
+        edit_current: impl Fn(&str, u32, u32) -> String + Send + Sync + 'static
+    ) -> Self {
+        Self { current: Box::new(current), edit_current: Box::new(edit_current) }
     }
 
     pub fn render_current(
         &self,
-        _session: &str,
-        _scriptid: u32,
-        _address: u32,
+        session: &str,
+        scriptid: u32,
+        address: u32,
         current: String
-    ) -> impl Display + Into<FormChild> {
-        Division::builder().class("current").text(current).build()
+    ) -> impl Display + Into<TableRowChild> {
+        TableCell::builder()
+            .division(|b| b
+                .class("current")
+                .division(|b| b.text(current))
+                .button(|b| b
+                    .data("hx-get", (self.edit_current)(session, scriptid, address))
+                    .text("✏️")))
+            .build()
+    }
+
+    pub fn render_current_edit(
+        &self,
+        session: &str,
+        scriptid: u32,
+        address: u32,
+        current: String
+    ) -> impl Display + Into<TableRowChild> {
+        let url = (self.current)(session, scriptid, address);
+
+        TableCell::builder()
+            .division(|b| b
+                .class("current")
+                .input(|b| b.type_("text").name("current").value(current))
+                .button(|b| b
+                    .data("hx-put", url.clone())
+                    .data("hx-include", "closest tr")
+                    .text("💾"))
+                .button(|b| b
+                    .data("hx-get", url)
+                    .text("❌")))
+            .build()
     }
 
     pub fn render(
@@ -53,24 +87,15 @@ impl View {
                             .table_header(|b| b.text("control"))
                             .table_header(|b| b.text("current"))))
                     .table_body(|b| b
-                        .data("hx-target", "find .current")
+                        .data("hx-target", "closest td")
                         .data("hx-swap", "outerHTML")
-                        .data("hx-on::before-request", "event.detail.elt.elements['current'].value = ''")
                         .extend(rows.into_iter().map(|Row { address, speaker, original, control, current }|
                             TableRow::builder()
                                 .table_cell(|b| b.text(address.to_string()))
                                 .table_cell(|b| b.text(speaker))
-                                .table_cell(|b| b.text(original))
+                                .table_cell(|b| b.lang("ja").text(original))
                                 .table_cell(|b| b.text(control))
-                                .table_cell(|b| b
-                                    .form(|b| b
-                                        .data("hx-patch", (self.update_current)(session, scriptid, address))
-                                        .push(self.render_current(session, scriptid, address, current))
-                                        .input(|b| b
-                                            .type_("text")
-                                            .name("current"))
-                                        .button(|b| b
-                                            .text("💾"))))
+                                .push(self.render_current(session, scriptid, address, current))
                             .build()))))
                 .push(htmx()))
             .build()
