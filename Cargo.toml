@@ -20,11 +20,15 @@ tracing = "0.1"
 tower-http = { version = "0.5", features = ["trace"] }
 html = "0.6"
 bytes = "1.5"
+once_cell = "1.19"
 
 [dependencies.llama]
-package = "llama_cpp_rs"
-git = "https://github.com/mdrokz/rust-llama.cpp.git"
-rev = "081e979"
+package = "llama-cpp-2"
+git = "https://github.com/utilityai/llama-cpp-rs.git"
+rev = "4d0c363"
+
+[features]
+cuda = ["llama/cublas"]
 
 [profile.release]
 lto = "fat"
