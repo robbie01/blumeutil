@@ -144,7 +144,7 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
     tx.set_drop_behavior(DropBehavior::Commit);
 
     let scripts = if args.all {
-        let mut stmt = tx.prepare("SELECT id, LENGTH(script) FROM scripts WHERE id >= 100")?;
+        let mut stmt = tx.prepare("SELECT id, LENGTH(script) FROM scripts WHERE id >= 100 AND id < 200")?;
         let scripts = stmt.query_map((), |row| <(u32, usize)>::try_from(row))?.collect::<Result<Vec<_>, _>>()?;
         scripts
     } else {
@@ -156,7 +156,7 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
         scripts
     };
 
-    let mut stmt = tx.prepare("INSERT OR IGNORE INTO lines(scriptid, address, speaker, line) VALUES(?, ?, ?, ?)")?;
+    let mut stmt = tx.prepare("INSERT OR IGNORE INTO lines(scriptid, address, speaker, line) VALUES (?, ?, ?, ?)")?;
 
     for (script_id, script_size) in scripts {
         println!("Processing script {script_id}");

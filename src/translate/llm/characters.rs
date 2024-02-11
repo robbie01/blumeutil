@@ -113,12 +113,27 @@ pub static CHARACTERS: Lazy<Box<[Character]>> = Lazy::new(|| Box::new([
         enfull: Some("Conrad Bathory"),
         ..Default::default()
     },
+    Character {
+        jpspeaker: "バラージュ",
+        enspeaker: "Balazs",
+        gender: "Male",
+        jpfull: Some("バラージュ・フォン・イシュトヴァーン"),
+        enfull: Some("Balazs von Ishtvaan"),
+        ..Default::default()
+    },
 
     Character { jpspeaker: "クラウス", enspeaker: "Klaus", gender: "Male", ..Default::default() },
     Character { jpspeaker: "ステファン", enspeaker: "Stefan", gender: "Male", ..Default::default() },
     Character { jpspeaker: "レルム", enspeaker: "Relm", gender: "Male", ..Default::default() },
     Character { jpspeaker: "レオ", enspeaker: "Leo", gender: "Male", ..Default::default() },
     Character { jpspeaker: "ギルベルト", enspeaker: "Gilbert", gender: "Male", ..Default::default() },
+    Character { jpspeaker: "エミリオ", enspeaker: "Emilio", gender: "Male", ..Default::default() },
+    Character { jpspeaker: "ディメトリオ", enspeaker: "Demetrio", gender: "Male", ..Default::default() },
+    Character { jpspeaker: "オリヴィア", enspeaker: "Olivia", gender: "Female", ..Default::default() },
+    Character { jpspeaker: "ヴォルマー", enspeaker: "Volmer", gender: "Male", ..Default::default() },
+    Character { jpspeaker: "ダンケルハイト", enspeaker: "Dunkelheit", gender: "Male", ..Default::default() },
+    Character { jpspeaker: "人狼", enspeaker: "Werewolf", gender: "Male", ..Default::default() },
+    Character { jpspeaker: "黒衣の男性", enspeaker: "Man in black", gender: "Male", ..Default::default() }
 ]));
 
 #[derive(Clone, Debug)]
@@ -130,8 +145,8 @@ pub enum EnSpeaker {
 impl Display for EnSpeaker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EnSpeaker::Str(s) => s.fmt(f),
-            EnSpeaker::Character(c) => c.enspeaker.fmt(f)
+            EnSpeaker::Str(s) => Display::fmt(s, f),
+            EnSpeaker::Character(c) => Display::fmt(c.enspeaker, f)
         }
     }
 }

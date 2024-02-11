@@ -4,13 +4,22 @@ use std::{fmt::{Display, Write as _}, collections::HashSet};
 
 use rusqlite::{Connection, DropBehavior};
 use llama::{
-    context::{params::LlamaContextParams, sample::Sampler}, llama_backend::LlamaBackend, llama_batch::LlamaBatch, model::{
-        params::LlamaModelParams, LlamaModel
-    }, token::{data_array::LlamaTokenDataArray, LlamaToken}
+    context::params::LlamaContextParams,
+    llama_backend::LlamaBackend,
+    llama_batch::LlamaBatch,
+    model::{
+        AddBos,
+        LlamaModel,
+        params::LlamaModelParams
+    },
+    token::{
+        LlamaToken,
+        data_array::LlamaTokenDataArray
+    }
 };
 use once_cell::sync::Lazy;
 
-use self::characters::{decode_jp_speaker, Character, EnSpeaker};
+use characters::{decode_jp_speaker, Character, EnSpeaker};
 
 static LLAMA_BACKEND: Lazy<LlamaBackend> = Lazy::new(|| LlamaBackend::init().unwrap());
 
@@ -46,13 +55,11 @@ impl Display for Seen {
 }
 
 fn build_header(seen: &[Seen], next_speaker: Option<&str>) -> anyhow::Result<String> {
-    // TODO: this is *hella* inefficient
-
     let cs = seen.iter()
         .filter_map(|s| s.speaker.as_ref())
         .map(|(j, _)| j.as_str())
         .chain(next_speaker)
-        .filter_map(|j| match characters::decode_jp_speaker(j) {
+        .filter_map(|j| match decode_jp_speaker(j) {
             Ok(EnSpeaker::Str(_)) => None,
             Ok(EnSpeaker::Character(c)) => Some(Ok(c)),
             Err(e) => Some(Err(e))
@@ -110,11 +117,12 @@ impl Translator {
         Ok(Self { session, llm })
     }
 
-    fn get_completion(&self, prompt: &[LlamaToken], greedy: bool) -> anyhow::Result<String> {
+    fn get_completion(&self, prompt: &[LlamaToken]) -> anyhow::Result<String> {
         let mut ctx = self.llm.new_context(
             &LLAMA_BACKEND,
             LlamaContextParams::default()
                 .with_seed(1234567890)
+                .with_n_batch(2048)
                 .with_n_ctx(None)
         )?;
 
@@ -138,11 +146,11 @@ impl Translator {
 
         let mut tokens = Vec::new();
         loop {
-            let token = ctx.sample(
-                Sampler::new(LlamaTokenDataArray::from_iter(
+            let token = ctx.sample_token_greedy(
+                LlamaTokenDataArray::from_iter(
                     ctx.candidates_ith(batch.n_tokens() - 1),
                     false
-                )).with_temperature(if greedy { 0.0 } else { 1.0 })
+                )
             );
             if token == self.llm.token_eos() {
                 eprint!("\n\n");
@@ -201,7 +209,7 @@ impl Translator {
 
             let prompt = loop {
                 let strprompt = build_prompt(&seen, (!speaker.is_empty()).then_some(&speaker), &line)?;
-                let prompt = self.llm.str_to_token(&strprompt, llama::model::AddBos::Always)?;
+                let prompt = self.llm.str_to_token(&strprompt, AddBos::Always)?;
                 if prompt.len() > (n_ctx - TOKENS_RESERVED).into() {
                     seen.remove(0);
                     continue;
@@ -211,14 +219,7 @@ impl Translator {
 
             eprintln!("address = {address}");
             eprintln!("{line}");
-            let translation = match self.get_completion(&prompt, true) {
-                Ok(tl) => Ok(tl),
-                Err(e) if e.is::<MaxTokensReachedError>() => {
-                    eprintln!("max tokens reached, attempting sample");
-                    self.get_completion(&prompt, false)
-                },
-                res => res
-            }?;
+            let translation = self.get_completion(&prompt)?;
             tx.execute("
                 INSERT INTO translations(session, scriptid, address, translation)
                 VALUES (?, ?, ?, ?)
