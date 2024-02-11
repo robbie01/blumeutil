@@ -4,7 +4,7 @@ use std::{fmt::{Display, Write as _}, collections::HashSet};
 
 use rusqlite::{Connection, DropBehavior};
 use llama::{
-    context::params::LlamaContextParams, llama_backend::LlamaBackend, llama_batch::LlamaBatch, model::{
+    context::{params::LlamaContextParams, sample::Sampler}, llama_backend::LlamaBackend, llama_batch::LlamaBatch, model::{
         params::LlamaModelParams, LlamaModel
     }, token::{data_array::LlamaTokenDataArray, LlamaToken}
 };
@@ -83,6 +83,17 @@ fn build_prompt(seen: &[Seen], next_speaker: Option<&str>, next_line: &str) -> a
     Ok(prompt)
 }
 
+#[derive(Clone, Debug)]
+struct MaxTokensReachedError(Vec<LlamaToken>);
+
+impl Display for MaxTokensReachedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("maximum number of tokens reached")
+    }
+}
+
+impl std::error::Error for MaxTokensReachedError {}
+
 impl Translator {
     pub fn new(session: String) -> anyhow::Result<Self> {
         let llm = LlamaModel::load_from_file(
@@ -99,7 +110,7 @@ impl Translator {
         Ok(Self { session, llm })
     }
 
-    fn get_completion(&self, prompt: &[LlamaToken]) -> anyhow::Result<String> {
+    fn get_completion(&self, prompt: &[LlamaToken], greedy: bool) -> anyhow::Result<String> {
         let mut ctx = self.llm.new_context(
             &LLAMA_BACKEND,
             LlamaContextParams::default()
@@ -127,16 +138,22 @@ impl Translator {
 
         let mut tokens = Vec::new();
         loop {
-            let token = ctx.sample_token_greedy(
-                LlamaTokenDataArray::from_iter(
+            let token = ctx.sample(
+                Sampler::new(LlamaTokenDataArray::from_iter(
                     ctx.candidates_ith(batch.n_tokens() - 1),
                     false
-                )
+                )).with_temperature(if greedy { 0.0 } else { 1.0 })
             );
             if token == self.llm.token_eos() {
+                eprint!("\n\n");
                 break;
             }
+            eprint!("{}", self.llm.token_to_str(token)?);
             tokens.push(token);
+            if tokens.len() >= TOKENS_RESERVED.into() {
+                eprintln!();
+                return Err(MaxTokensReachedError(tokens).into());
+            }
             batch.clear();
             batch.add(token, pos, &[0], true)?;
             pos += 1;
@@ -192,8 +209,16 @@ impl Translator {
                 break prompt;
             };
 
-            let translation = self.get_completion(&prompt)?;
-            print!("{translation}\n\n");
+            eprintln!("address = {address}");
+            eprintln!("{line}");
+            let translation = match self.get_completion(&prompt, true) {
+                Ok(tl) => Ok(tl),
+                Err(e) if e.is::<MaxTokensReachedError>() => {
+                    eprintln!("max tokens reached, attempting sample");
+                    self.get_completion(&prompt, false)
+                },
+                res => res
+            }?;
             tx.execute("
                 INSERT INTO translations(session, scriptid, address, translation)
                 VALUES (?, ?, ?, ?)
