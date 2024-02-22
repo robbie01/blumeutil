@@ -7,7 +7,7 @@ pub struct Args {}
 pub fn run(mut db: Connection, _args: Args) -> anyhow::Result<()> {
     let tx = db.transaction()?;
     tx.execute_batch("
-        CREATE TABLE config(name TEXT PRIMARY KEY, value ANY) WITHOUT ROWID, STRICT;
+        CREATE TABLE config(name TEXT PRIMARY KEY, value ANY NOT NULL) WITHOUT ROWID, STRICT;
         CREATE TABLE scripts(id INTEGER PRIMARY KEY, script BLOB NOT NULL) STRICT;
         CREATE TABLE lines(
             scriptid INTEGER REFERENCES scripts(id),

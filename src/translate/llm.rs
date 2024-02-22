@@ -1,6 +1,6 @@
 mod characters;
 
-use std::{fmt::{Display, Write as _}, collections::HashSet};
+use std::{collections::HashSet, fmt::{Display, Write as _}, num::NonZeroU32};
 
 use rusqlite::{Connection, DropBehavior};
 use llama::{
@@ -44,11 +44,11 @@ impl Display for Seen {
         if let Some((ref jpspeaker, _)) = self.speaker {
             write!(f, "[{jpspeaker}]: ")?;
         }
-        write!(f, "{}\n<<ENGLISH>> (fidelity = high)\n", &self.jpline)?;
+        write!(f, "{}\n<<ENGLISH>>\n", &self.jpline)?;
         if let Some((_, ref enspeaker)) = self.speaker {
             write!(f, "[{enspeaker}]: ")?;
         }
-        write!(f, "{}</s>", &self.enline)?;
+        write!(f, "{}<|endoftext|>", &self.enline)?;
 
         Ok(())
     }
@@ -65,10 +65,11 @@ fn build_header(seen: &[Seen], next_speaker: Option<&str>) -> anyhow::Result<Str
             Err(e) => Some(Err(e))
         })
         .collect::<anyhow::Result<HashSet<&Character>>>()?;
-    let mut header = "<<START>>\n".to_owned();
+    let mut header = "<<METADATA>>\n".to_owned();
     for c in cs {
-        write!(header, "{c}\n")?;
+        write!(header, "[character] {c}\n")?;
     }
+    write!(header, "<<START>>\n")?;
 
     Ok(header)
 }
@@ -82,7 +83,7 @@ fn build_prompt(seen: &[Seen], next_speaker: Option<&str>, next_line: &str) -> a
     if let Some(next_speaker) = next_speaker {
         write!(prompt, "[{next_speaker}]: ")?;
     }
-    write!(prompt, "{next_line}\n<<ENGLISH>> (fidelity = high)\n")?;
+    write!(prompt, "{next_line}\n<<ENGLISH>>\n")?;
     if let Some(enspeaker) = next_speaker.map(decode_jp_speaker).transpose()? {
         write!(prompt, "[{enspeaker}]: ")?;
     }
@@ -105,7 +106,7 @@ impl Translator {
     pub fn new(session: String) -> anyhow::Result<Self> {
         let llm = LlamaModel::load_from_file(
             &LLAMA_BACKEND,
-            "/home/robbie/models/vntl-7b-v0.3.1-hf-Q8_0.gguf", 
+            "/home/robbie/models/vntl-13b-v0.2-Q4_K_M.gguf", 
             &LlamaModelParams::default()
                 .with_n_gpu_layers(if cfg!(feature = "cuda") {
                     i32::MAX as u32
@@ -117,13 +118,12 @@ impl Translator {
         Ok(Self { session, llm })
     }
 
-    fn get_completion(&self, prompt: &[LlamaToken]) -> anyhow::Result<String> {
+    fn get_completion(&self, prompt: &[LlamaToken], n_ctx: u16) -> anyhow::Result<String> {
         let mut ctx = self.llm.new_context(
             &LLAMA_BACKEND,
             LlamaContextParams::default()
                 .with_seed(1234567890)
-                .with_n_batch(2048)
-                .with_n_ctx(None)
+                .with_n_ctx(NonZeroU32::new(n_ctx.into()))
         )?;
 
         let n_batch = ctx.n_batch().try_into()?;
@@ -172,7 +172,7 @@ impl Translator {
     }
 
     pub fn translate(&self, db: &mut Connection, script: u32) -> anyhow::Result<()> {
-        let n_ctx = self.llm.n_ctx_train();
+        let n_ctx = self.llm.n_ctx_train().min(4096);
 
         let mut seen = Vec::new();
 
@@ -219,7 +219,7 @@ impl Translator {
 
             eprintln!("address = {address}");
             eprintln!("{line}");
-            let translation = self.get_completion(&prompt)?;
+            let translation = self.get_completion(&prompt, n_ctx)?;
             tx.execute("
                 INSERT INTO translations(session, scriptid, address, translation)
                 VALUES (?, ?, ?, ?)

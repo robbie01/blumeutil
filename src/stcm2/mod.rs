@@ -146,6 +146,7 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
     let scripts = if args.all {
         let mut stmt = tx.prepare("SELECT id, LENGTH(script) FROM scripts WHERE id >= 100 AND id < 200")?;
         let scripts = stmt.query_map((), |row| <(u32, usize)>::try_from(row))?.collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
         scripts
     } else {
         let mut stmt = tx.prepare(&format!(
@@ -153,6 +154,7 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
             vec!["?"; args.id.len()].join(", ")
         ))?;
         let scripts = stmt.query_map(rusqlite::params_from_iter(args.id), |row| <(u32, usize)>::try_from(row))?.collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
         scripts
     };
 
@@ -192,25 +194,22 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
         };
 
         let mut file = file;
-        let mut pos = 0;
+        let start_addr = file.as_ptr();
 
         // CODE_START_ will be 16-byte aligned
         while !file.starts_with(CODE_START_MAGIC) {
             file.advance(16);
-            pos += 16;
         }
         file.advance(CODE_START_MAGIC.len());
-        pos += CODE_START_MAGIC.len();
 
         let mut actions = Vec::new();
         loop {
-            let addr = pos as u32;
+            let addr = unsafe { file.as_ptr().offset_from(start_addr) }.try_into()?;
             
             let global_call = file.get_u32_le();
             let opcode = file.get_u32_le();
             let nparams = file.get_u32_le();
             let length = file.get_u32_le();
-            pos += 16;
 
             if length == 0 { break }
 
@@ -222,13 +221,11 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
             let mut params = Vec::with_capacity(nparams as usize);
             for _ in 0..nparams {
                 let buffer = [file.get_u32_le(), file.get_u32_le(), file.get_u32_le()];
-                pos += 12;
                 params.push(Parameter::parse(buffer, addr + 16 + 12*nparams, length - 16 - 12*nparams)?);
             }
 
             let ndata = length - 16 - 12*nparams;
             let data = file.split_to(ndata as usize);
-            pos += ndata as usize;
 
             let export = exports.iter()
                 .position(|e| e.addr == u64::from(addr))

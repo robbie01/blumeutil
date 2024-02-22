@@ -1,14 +1,15 @@
-use std::{borrow::Cow, fmt::Display};
+use std::{borrow::Cow, fmt::Display, hash::{Hash, Hasher}};
 use once_cell::sync::Lazy;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Default)]
 pub struct Character {
     pub jpspeaker: &'static str,
     pub enspeaker: &'static str,
     pub gender: &'static str,
     pub jpfull: Option<&'static str>,
     pub enfull: Option<&'static str>,
-    pub aliases: Box<[(&'static str, &'static str)]>
+    pub aliases: Box<[(&'static str, &'static str)]>,
+    _private: ()
 }
 
 impl Display for Character {
@@ -31,6 +32,20 @@ impl Display for Character {
         }
 
         Ok(())
+    }
+}
+
+impl PartialEq for Character {
+    fn eq(&self, other: &Self) -> bool {
+        self.jpspeaker.eq(other.jpspeaker)
+    }
+}
+
+impl Eq for Character {}
+
+impl Hash for Character {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.jpspeaker.hash(state)
     }
 }
 
@@ -79,7 +94,8 @@ pub static CHARACTERS: Lazy<Box<[Character]>> = Lazy::new(|| Box::new([
         gender: "Male",
         jpfull: Some("リチャード・カンテミール"),
         enfull: Some("Richard Cantemir"),
-        aliases: Box::new([("お兄ちゃん", "Onii-chan")]) // i'm so sorry
+        aliases: Box::new([("お兄ちゃん", "Onii-chan")]), // i'm so sorry
+        ..Default::default()
     },
     Character {
         jpspeaker: "ヤコブ",
@@ -87,7 +103,8 @@ pub static CHARACTERS: Lazy<Box<[Character]>> = Lazy::new(|| Box::new([
         gender: "Male",
         jpfull: Some("ヤコブ・カンテミール"),
         enfull: Some("Jacob Cantemir"),
-        aliases: Box::new([("村長", "mayor")])
+        aliases: Box::new([("村長", "mayor")]),
+        ..Default::default()
     },
     Character {
         jpspeaker: "バージニア",

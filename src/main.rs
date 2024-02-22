@@ -1,4 +1,6 @@
-#![recursion_limit = "512"]
+#![recursion_limit = "512"] // for html
+#![allow(clippy::write_with_newline)] // for consistency
+#![allow(clippy::manual_non_exhaustive)] // no, clippy, non_exhaustive doesnt apply to modules
 
 mod config;
 mod init;

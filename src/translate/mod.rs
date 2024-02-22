@@ -34,7 +34,7 @@ pub async fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
             tl.translate(cli, &mut db, args.script_id).await?;
         },
         Provider::Llm => {
-            let tl = LlmTramslator::new("vntl-greedy-20240210".to_owned())?;
+            let tl = LlmTramslator::new("vntl-greedy-20240220".to_owned())?;
             tl.translate(&mut db, args.script_id)?;
         }
     }
