@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension as _};
 
 pub struct Model {
     db: Mutex<Connection>
@@ -67,7 +67,7 @@ impl Model {
                 "SELECT translation FROM translations WHERE session = ? AND scriptid = ? AND address = ?",
                 (session, scriptid, address),
                 |row| row.get(0)
-            )
+            ).optional().map(Option::unwrap_or_default)
         }
     }
 }

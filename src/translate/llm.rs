@@ -92,11 +92,12 @@ fn build_prompt(seen: &[Seen], next_speaker: Option<&str>, next_line: &str) -> a
 }
 
 #[derive(Clone, Debug)]
-struct MaxTokensReachedError(Vec<LlamaToken>);
+struct MaxTokensReachedError(String);
 
 impl Display for MaxTokensReachedError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("maximum number of tokens reached")
+        f.write_str("maximum number of tokens reached: ")?;
+        f.write_str(&self.0)
     }
 }
 
@@ -144,7 +145,8 @@ impl Translator {
             ctx.decode(&mut batch)?;
         }
 
-        let mut tokens = Vec::new();
+        let mut ntokens = 0;
+        let mut tokens = String::new();
         loop {
             let token = ctx.sample_token_greedy(
                 LlamaTokenDataArray::from_iter(
@@ -153,13 +155,15 @@ impl Translator {
                 )
             );
             if token == self.llm.token_eos() {
-                eprint!("\n\n");
                 break;
             }
-            eprint!("{}", self.llm.token_to_str(token)?);
-            tokens.push(token);
-            if tokens.len() >= TOKENS_RESERVED.into() {
-                eprintln!();
+            tokens.push_str(&self.llm.token_to_str(token)?);
+            if let Some(idx) = tokens.find('<') {
+                tokens.truncate(idx);
+                break;
+            }
+            ntokens += 1;
+            if ntokens >= TOKENS_RESERVED {
                 return Err(MaxTokensReachedError(tokens).into());
             }
             batch.clear();
@@ -168,7 +172,7 @@ impl Translator {
             ctx.decode(&mut batch)?;
         }
 
-        Ok(self.llm.tokens_to_str(&tokens)?.trim().to_owned())
+        Ok(tokens.trim().to_owned())
     }
 
     pub fn translate(&self, db: &mut Connection, script: u32) -> anyhow::Result<()> {
@@ -220,6 +224,7 @@ impl Translator {
             eprintln!("address = {address}");
             eprintln!("{line}");
             let translation = self.get_completion(&prompt, n_ctx)?;
+            eprintln!("{translation}\n");
             tx.execute("
                 INSERT INTO translations(session, scriptid, address, translation)
                 VALUES (?, ?, ?, ?)

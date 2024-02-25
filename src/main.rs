@@ -52,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_NO_MUTEX
         )?
     };
+    db.pragma_update(None, "foreign_keys", true)?;
 
     use Command::*;
     match args.command {

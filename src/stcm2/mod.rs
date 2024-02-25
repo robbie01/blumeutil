@@ -204,7 +204,7 @@ pub fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
 
         let mut actions = Vec::new();
         loop {
-            let addr = unsafe { file.as_ptr().offset_from(start_addr) }.try_into()?;
+            let addr = (file.as_ptr() as usize - start_addr as usize).try_into()?;
             
             let global_call = file.get_u32_le();
             let opcode = file.get_u32_le();
