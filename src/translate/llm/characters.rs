@@ -2,6 +2,7 @@ use std::{borrow::Cow, fmt::Display, hash::{Hash, Hasher}};
 use once_cell::sync::Lazy;
 
 #[derive(Debug, Default)]
+#[allow(clippy::manual_non_exhaustive)] 
 pub struct Character {
     pub jpspeaker: &'static str,
     pub enspeaker: &'static str,

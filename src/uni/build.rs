@@ -41,14 +41,13 @@ fn next_sector(mut w: impl Write + Seek) -> anyhow::Result<u64> {
     Ok(sect)
 }
 
-pub fn build(mut db: Connection, args: Args) -> anyhow::Result<()> {
+pub fn build(db: Connection, args: Args) -> anyhow::Result<()> {
     let mut entries = Vec::new();
 
     let mut file = File::create(args.uni)?;
-    let tx = db.transaction()?;
 
     file.write_all(UNI2_MAGIC)?;
-    let len = tx.query_row("SELECT COUNT(*) FROM scripts", (), |row| row.get::<_, usize>(0))?;
+    let len = db.query_row("SELECT COUNT(*) FROM scripts", (), |row| row.get::<_, usize>(0))?;
     ensure!(u64::try_from(len)? <= SECTOR_SIZE / 16);
     write_u32_le(&mut file, len.try_into()?)?;
     write_u32_le(&mut file, TABLE_SECT)?;
@@ -56,7 +55,7 @@ pub fn build(mut db: Connection, args: Args) -> anyhow::Result<()> {
     
     to_sector(&mut file, DATA_SECT.into())?;
 
-    let mut stmt = tx.prepare("
+    let mut stmt = db.prepare("
         SELECT id, IFNULL(ps.script, s.script) FROM scripts AS s LEFT JOIN patchedscripts AS ps USING (id)
     ")?;
     // let mut stmt = tx.prepare("

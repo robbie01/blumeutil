@@ -1,3 +1,5 @@
+#![allow(clippy::write_with_newline)]
+
 mod characters;
 
 use std::{collections::HashSet, fmt::{Display, Write as _}, num::NonZeroU32};

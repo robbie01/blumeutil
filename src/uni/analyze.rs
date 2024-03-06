@@ -1,4 +1,4 @@
-use std::{fs::File, iter, io::{self, BufReader, SeekFrom, Read as _, Seek as _, BufRead as _}};
+use std::{fs::File, io::{self, BufReader, SeekFrom, Read as _, Seek as _, BufRead as _}};
 use anyhow::ensure;
 use rusqlite::{blob::ZeroBlob, Connection, DatabaseName};
 use super::{Args, Entry, UNI2_MAGIC, SECTOR_SIZE};
@@ -35,13 +35,14 @@ pub fn analyze(mut db: Connection, args: Args) -> anyhow::Result<()> {
 
     file.seek(SeekFrom::Start(table_sect*SECTOR_SIZE))?;
 
-    let entries = iter::repeat_with(|| {
+    let mut entries = Vec::with_capacity(n);
+    for _ in 0..n {
         let id = read_u32_le(&mut file)?;
         let start_sect = read_u32_le(&mut file)?;
         let size_sect = read_u32_le(&mut file)?;
         let size = read_u32_le(&mut file)?;
-        Ok(Entry { id, start_sect: start_sect.into(), size_sect: size_sect.into(), size: size.into() })
-    }).take(n).collect::<anyhow::Result<Vec<Entry>>>()?;
+        entries.push(Entry { id, start_sect: start_sect.into(), size_sect: size_sect.into(), size: size.into() })
+    }
 
     ensure!(validate(&entries), "table failed validation");
 

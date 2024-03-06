@@ -1,6 +1,5 @@
-use std::io;
-use bytes::{BytesMut, BufMut as _};
-use rusqlite::{Connection, DatabaseName, DropBehavior};
+use bytes::Bytes;
+use rusqlite::{Connection, DropBehavior};
 
 use super::{Args, parse, format};
 
@@ -8,14 +7,9 @@ pub fn analyze(mut db: Connection, args: Args) -> anyhow::Result<()> {
     let mut tx = db.transaction()?;
     tx.set_drop_behavior(DropBehavior::Commit);
 
-    let script_size = tx.query_row("SELECT LENGTH(script) FROM scripts WHERE id = ?", (args.id,), |row| row.get(0))?;
-    let mut file = BytesMut::with_capacity(script_size).writer();
-    io::copy(
-        &mut tx.blob_open(DatabaseName::Main, "scripts", "script", args.id.into(), true)?,
-        &mut file
-    )?;
+    let file = tx.query_row("SELECT script FROM scripts WHERE id = ?", (args.id,), |row| Ok(Bytes::copy_from_slice(row.get_ref(0)?.as_blob()?)))?;
 
-    let stcm2 = format::from_bytes(file.into_inner().freeze())?;
+    let stcm2 = format::from_bytes(file)?;
 
     let parsed = parse::parse(stcm2.actions.into_iter().filter_map(|(addr, act)| act.op(addr.orig()).ok()))?;
 
