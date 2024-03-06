@@ -1,5 +1,5 @@
 use std::iter;
-use anyhow::{bail, Context as _};
+use anyhow::{ensure, Context as _};
 use reqwest::Client;
 use rusqlite::{Connection, DropBehavior};
 use serde_json::{json, Value};
@@ -40,10 +40,7 @@ impl Translator {
                 }))
                 .send().await?;
 
-            if !res.status().is_success() {
-                let d = format!("{res:?}");
-                bail!("bad response: {d}\n{}", res.text().await?);
-            }
+            ensure!(res.status().is_success(), "bad response: {}\n{}", format!("{res:?}"), res.text().await?);
 
             let res = res.json::<Value>().await?;
 

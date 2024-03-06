@@ -1,6 +1,6 @@
 use std::mem;
 
-use super::Operation;
+use super::format::Operation;
 use anyhow::ensure;
 use encoding_rs::SHIFT_JIS;
 
@@ -43,16 +43,16 @@ pub fn parse(it: impl IntoIterator<Item = Operation>) -> anyhow::Result<Vec<Dial
     let mut di = Vec::new();
     for op in it {
         match op {
-            Line(addr, s) => {
+            Line { addr, s } => {
                 ensure!(st.options.is_empty(), "incorrect line state\nst = {st:#X?}");
                 if st.addr.is_none() { st.addr = Some(addr); }
                 st.line.push_str(trim(&decode(&s)));
             },
-            Choice(addr, _, s) => {
+            Choice { addr, id: _, s } => {
                 if st.addr.is_none() { st.addr = Some(addr); }
                 st.options.push(decode(&s));
             },
-            Speaker(addr, s) => {
+            Speaker { addr, s } => {
                 ensure!(st.speaker.is_empty() && st.options.is_empty(), "incorrect speaker state\nst = {st:#X?}");
                 if st.addr.is_none() { st.addr = Some(addr); }
                 st.speaker.push_str(&decode(&s));

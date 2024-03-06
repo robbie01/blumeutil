@@ -1,12 +1,14 @@
-#![recursion_limit = "512"] // for html
+#![cfg_attr(feature = "web", recursion_limit = "512")] // for html
 #![allow(clippy::write_with_newline)] // for consistency
 #![allow(clippy::manual_non_exhaustive)] // no, clippy, non_exhaustive doesnt apply to modules
 
 mod config;
 mod init;
-mod deuni;
+mod uni;
 mod stcm2;
+#[cfg(feature = "translate")]
 mod translate;
+#[cfg(feature = "web")]
 mod web;
 mod cleanup;
 mod checkpunct;
@@ -29,10 +31,11 @@ struct Args {
 enum Command {
     Config(config::Args),
     Init(init::Args),
-    #[command(name = "deuni")]
-    DeUni(deuni::Args),
+    Uni(uni::Args),
     Stcm2(stcm2::Args),
+    #[cfg(feature = "translate")]
     Translate(translate::Args),
+    #[cfg(feature = "web")]
     Web(web::Args),
     Cleanup(cleanup::Args),
     Checkpunct(checkpunct::Args)
@@ -42,6 +45,7 @@ enum Command {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     
+    #[cfg(feature = "web")]
     tracing_subscriber::fmt::init();
 
     let db = match args.command {
@@ -58,9 +62,11 @@ async fn main() -> anyhow::Result<()> {
     match args.command {
         Config(margs) => config::run(db, margs),
         Init(margs) => init::run(db, margs),
-        DeUni(margs) => deuni::run(db, margs),
+        Uni(margs) => uni::run(db, margs),
         Stcm2(margs) => stcm2::run(db, margs),
+        #[cfg(feature = "translate")]
         Translate(margs) => translate::run(db, margs).await,
+        #[cfg(feature = "web")]
         Web(margs) => web::run(db, margs).await,
         Cleanup(margs) => cleanup::run(db, margs),
         Checkpunct(margs) => checkpunct::run(db, margs)
