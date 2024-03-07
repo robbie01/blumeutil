@@ -38,9 +38,9 @@ static SPEAKERS: Lazy<HashMap<&[u8], Bytes>> = Lazy::new(|| HashMap::from([
     (b"\x83W\x83F\x83\x89\x83\x8b\x83h", encode_string(b"Gerald").unwrap().freeze()),
     (b"\x83R\x83\x93\x83\x89\x83b\x83h", encode_string(b"Conrad").unwrap().freeze()),
     (b"\x83o\x83\x89\x81[\x83W\x83\x85", encode_string(b"Balazs").unwrap().freeze()),
-    (b"\x83N\x83\x89\x83E\x83X", encode_string(b"Klaus").unwrap().freeze()),
+    (b"\x83N\x83\x89\x83E\x83X", encode_string(b"Claus").unwrap().freeze()),
     (b"\x83X\x83e\x83t\x83@\x83\x93", encode_string(b"Stefan").unwrap().freeze()),
-    (b"\x83\x8c\x83\x8b\x83\x80", encode_string(b"Relm").unwrap().freeze()),
+    (b"\x83\x8c\x83\x8b\x83\x80", encode_string(b"Larm").unwrap().freeze()),
     (b"\x83\x8c\x83I", encode_string(b"Leo").unwrap().freeze()),
     (b"\x83M\x83\x8b\x83x\x83\x8b\x83g", encode_string(b"Gilbert").unwrap().freeze()),
     (b"\x83G\x83~\x83\x8a\x83I", encode_string(b"Emilio").unwrap().freeze()),
@@ -50,6 +50,10 @@ static SPEAKERS: Lazy<HashMap<&[u8], Bytes>> = Lazy::new(|| HashMap::from([
     (b"\x83_\x83\x93\x83P\x83\x8b\x83n\x83C\x83g", encode_string(b"Dunkelheit").unwrap().freeze()),
     (b"\x90l\x98T", encode_string(b"Werewolf").unwrap().freeze()),
     (b"\x8d\x95\x88\xdf\x82\xcc\x92j\x90\xab", encode_string(b"Man in black").unwrap().freeze()),
+    (b"\x83N\x83\x89\x83E\x83X\x82\xcc\x90\xba", encode_string(b"Claus's voice").unwrap().freeze()),
+    (b"\x83o\x81[\x83W\x83j\x83A\x82\xcc\x90\xba", encode_string(b"Virginia's voice").unwrap().freeze()),
+    (b"\x83I\x81[\x83M\x83\x85\x83X\x83g\x82\xcc\x90\xba", encode_string(b"Auguste's voice").unwrap().freeze()),
+    (b"\x83X\x83e\x83t\x83@\x83\x93\x82\xcc\x90\xba", encode_string(b"Stefan's voice").unwrap().freeze())
 ]));
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -203,6 +207,8 @@ pub fn patch(mut db: Connection, args: Args) -> anyhow::Result<()> {
                             const REPLACE: &[(&str, &str)] = &[
                                 // this should be in the db already :/
                                 ("Mary", "#Name[1]"),
+
+                                ("ä", "a"),
 
                                 // fullwidth -> halfwidth
                                 //("「", "｢"),

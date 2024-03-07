@@ -140,9 +140,9 @@ pub static CHARACTERS: Lazy<Box<[Character]>> = Lazy::new(|| Box::new([
         ..Default::default()
     },
 
-    Character { jpspeaker: "クラウス", enspeaker: "Klaus", gender: "Male", ..Default::default() },
+    Character { jpspeaker: "クラウス", enspeaker: "Claus", gender: "Male", ..Default::default() },
     Character { jpspeaker: "ステファン", enspeaker: "Stefan", gender: "Male", ..Default::default() },
-    Character { jpspeaker: "レルム", enspeaker: "Relm", gender: "Male", ..Default::default() },
+    Character { jpspeaker: "レルム", enspeaker: "Lärm", gender: "Male", ..Default::default() },
     Character { jpspeaker: "レオ", enspeaker: "Leo", gender: "Male", ..Default::default() },
     Character { jpspeaker: "ギルベルト", enspeaker: "Gilbert", gender: "Male", ..Default::default() },
     Character { jpspeaker: "エミリオ", enspeaker: "Emilio", gender: "Male", ..Default::default() },
