@@ -160,7 +160,7 @@ impl Translator {
                 break;
             }
             tokens.push_str(&self.llm.token_to_str(token)?);
-            if let Some(idx) = tokens.find('<') {
+            if let Some(idx) = tokens.find(['<', '\n']) {
                 tokens.truncate(idx);
                 break;
             }

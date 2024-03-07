@@ -176,7 +176,7 @@ fn decode_sjis(buf: &[u8]) -> anyhow::Result<Cow<'_, str>> {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let db = Connection::open(args.file)?;
-    let file = db.query_row("SELECT script FROM scripts WHERE id = ?", (args.id,),
+    let file = db.query_row("SELECT script FROM patchedscripts WHERE id = ?", (args.id,),
         |row| Ok(Bytes::copy_from_slice(row.get_ref(0)?.as_blob()?)))?;
     let mut stcm2 = from_bytes(file)?;
 

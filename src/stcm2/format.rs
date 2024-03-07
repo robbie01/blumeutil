@@ -8,37 +8,10 @@ const GLOBAL_DATA_MAGIC: &[u8] = b"GLOBAL_DATA\0\0\0\0\0";
 const CODE_START_MAGIC: &[u8] = b"CODE_START_\0";
 const EXPORT_DATA_MAGIC: &[u8] = b"EXPORT_DATA\0";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Address {
-    Original(u32),
-    User(u32, u32)
-}
-
-impl Address {
-    pub fn orig(self) -> u32 {
-        match self {
-            Self::Original(x) | Self::User(x, _) => x
-        }
-    }
-}
-
-impl Ord for Address {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use Address::*;
-        use std::cmp::Ordering::*;
-        match (self, other) {
-            (Original(a), Original(b)) => a.cmp(b),
-            (User(ax, ay), User(bx, by)) => ax.cmp(bx).then(ay.cmp(by)),
-            (Original(a), User(b, _)) => a.cmp(b).then(Less),
-            (User(a, _), Original(b)) => a.cmp(b).then(Greater)
-        }
-    }
-}
-
-impl PartialOrd<Address> for Address {
-    fn partial_cmp(&self, other: &Address) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Address {
+    pub orig: u32,
+    pub sub: u32
 }
 
 #[derive(Clone)]
@@ -88,7 +61,7 @@ impl Parameter {
                 let canary = rand::random();
                 resolvers.push(Box::new(move |refs, buf| {
                     assert_eq!(canary, u32::from_le_bytes(buf[current_pos+4..current_pos+8].try_into().unwrap()));
-                    let Some(&dest) = refs.get(&Reference::Action(Address::Original(addr))) else { return false };
+                    let Some(&dest) = refs.get(&Reference::Action(Address { orig: addr, sub: 0 })) else { return false };
                     buf[current_pos+4..current_pos+8].copy_from_slice(&dest.to_le_bytes());
                     true
                 }));
@@ -152,6 +125,7 @@ impl std::fmt::Display for DecodeUnimplemented {
 
 impl Action {
     pub const OP_SPEAKER: u32 = 0xd4;
+    pub const OP_YIELD: u32 = 0xd3;
     pub const OP_LINE: u32 = 0xd2;
     pub const OP_CHOICE: u32 = 0xe7;
     
@@ -182,7 +156,7 @@ impl Action {
         if self.call {
             resolvers.push(Box::new(move |refs, buf| {
                 assert_eq!(canary, u32::from_le_bytes(buf[new_addr+4..new_addr+8].try_into().unwrap()));
-                let Some(&dest) = refs.get(&Reference::Action(Address::Original(opcode))) else { return false };
+                let Some(&dest) = refs.get(&Reference::Action(Address { orig: opcode, sub: 0 })) else { return false };
                 buf[new_addr+4..new_addr+8].copy_from_slice(&dest.to_le_bytes());
                 true
             }));
@@ -289,7 +263,7 @@ pub fn from_bytes(file: Bytes) -> anyhow::Result<Stcm2> {
             .position(|e| e.addr == u64::from(addr))
             .map(|i| exports.swap_remove(i).name);
 
-        actions.insert(Address::Original(addr), Action { export, call, opcode, params, data });
+        actions.insert(Address { orig: addr, sub: 0 }, Action { export, call, opcode, params, data });
     }
 
     ensure!(exports.is_empty(), "exports left over!");
@@ -337,7 +311,6 @@ pub fn to_bytes(input: Stcm2) -> anyhow::Result<BytesMut> {
     while output.len() % 16 != 0 {
         output.put_u32_le(0);
     }
-
 
     let mut last_len = None;
     while !resolvers.is_empty() {

@@ -2,7 +2,6 @@ mod format;
 mod parse;
 mod analyze;
 mod patch;
-mod actions;
 
 use rusqlite::Connection;
 use clap::{Parser, ValueEnum};

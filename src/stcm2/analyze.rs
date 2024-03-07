@@ -11,7 +11,7 @@ pub fn analyze(mut db: Connection, args: Args) -> anyhow::Result<()> {
 
     let stcm2 = format::from_bytes(file)?;
 
-    let parsed = parse::parse(stcm2.actions.into_iter().filter_map(|(addr, act)| act.op(addr.orig()).ok()))?;
+    let parsed = parse::parse(stcm2.actions.into_iter().filter_map(|(addr, act)| act.op(addr.orig).ok()))?;
 
     let mut stmt = tx.prepare("INSERT OR IGNORE INTO lines(scriptid, address, speaker, line) VALUES (?, ?, ?, ?)")?;
     let mut n = 0;
