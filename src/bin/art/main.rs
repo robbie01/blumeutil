@@ -13,15 +13,12 @@ static ART2_MAGIC: &[u8; 4] = b"ART2";
 struct Args {
     uni: PathBuf
 }
-
+  
 #[inline(always)]
 fn transform_palette_id(id: u8) -> u8 {
+    // swap the two bits in the middle, for some reason
     // found using a PCSX2 texture dump, imageio, numpy, and a *lot* of guesswork
-    if id.checked_sub(8).is_some_and(|z| z % 32 < 16) {
-        id ^ 24
-    } else {
-        id
-    }
+    (id & 0b11100111) | ((id & 0b00010000) >> 1) | ((id & 0b00001000) << 1)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -46,8 +43,7 @@ fn main() -> anyhow::Result<()> {
                 let height = img.get_u32_le();
 
                 let name = img.split_to(16);
-                let name = SHIFT_JIS.decode_without_bom_handling_and_without_replacement(&name).unwrap_or_else(|| format!("{id:08X}").into());
-                let filename = format!("{}.png", name.trim_end_matches('\0'));
+                let filename = SHIFT_JIS.decode_without_bom_handling_and_without_replacement(&name).map_or_else(|| format!("{id:08X}.png"), |name| format!("{id:08X} - {}.png", name.trim_end_matches('\0')));
 
                 println!("dumping {filename}");
 
@@ -64,12 +60,15 @@ fn main() -> anyhow::Result<()> {
                     trns[id] = a;
                 }
 
-                let mut out = png::Encoder::new(File::create(filename)?, width, height);
-                out.set_color(png::ColorType::Indexed);
+                let mut info = png::Info::default();
+                info.width = width;
+                info.height = height;
+                info.color_type = png::ColorType::Indexed;
+                info.bit_depth = png::BitDepth::from_u8(bpp.try_into()?).context("bruh")?;
+                info.palette = Some(plte.into());
+                info.trns = Some(trns.into());
+                let mut out = png::Encoder::with_info(File::create(filename)?, info)?;
                 out.set_filter(png::FilterType::Paeth);
-                out.set_depth(png::BitDepth::from_u8(bpp.try_into()?).context("bruh")?);
-                out.set_palette(plte);
-                out.set_trns(trns);
                 let mut out = out.write_header()?;
                 out.write_image_data(&img)?;
                 out.finish()?;

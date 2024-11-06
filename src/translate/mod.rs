@@ -6,7 +6,6 @@ use clap::{Parser, ValueEnum};
 use rusqlite::Connection;
 use reqwest::Client;
 
-//use googlefree::Translator as GoogleFreeTranslator;
 use google::Translator as GoogleTranslator;
 use llm::Translator as LlmTramslator;
 
@@ -23,9 +22,10 @@ pub struct Args {
 }
 
 pub async fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
+    let cli = Client::new();
+
     match args.provider {
         Provider::Google => {
-            let cli = Client::new();
             let tl = GoogleTranslator::new(db.query_row(
                 "SELECT value FROM config WHERE name = 'google_api_key'",
                 (),
@@ -34,8 +34,8 @@ pub async fn run(mut db: Connection, args: Args) -> anyhow::Result<()> {
             tl.translate(cli, &mut db, args.script_id).await?;
         },
         Provider::Llm => {
-            let tl = LlmTramslator::new("vntl-greedy-20240220".to_owned())?;
-            tl.translate(&mut db, args.script_id)?;
+            let tl = LlmTramslator::new("vntl-greedy-20240823".to_owned())?;
+            tl.translate(cli, &mut db, args.script_id).await?;
         }
     }
 

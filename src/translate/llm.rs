@@ -2,35 +2,18 @@
 
 mod characters;
 
-use std::{collections::HashSet, fmt::{Display, Write as _}, num::NonZeroU32};
+use std::{collections::HashSet, fmt::{Display, Write as _}};
 
+use anyhow::Context;
+use reqwest::Client;
+use serde_json::json;
 use rusqlite::{Connection, DropBehavior};
-use llama::{
-    context::params::LlamaContextParams,
-    llama_backend::LlamaBackend,
-    llama_batch::LlamaBatch,
-    model::{
-        AddBos,
-        LlamaModel,
-        params::LlamaModelParams
-    },
-    token::{
-        LlamaToken,
-        data_array::LlamaTokenDataArray
-    }
-};
-use once_cell::sync::Lazy;
 
 use characters::{decode_jp_speaker, Character, EnSpeaker};
 
-static LLAMA_BACKEND: Lazy<LlamaBackend> = Lazy::new(|| LlamaBackend::init().unwrap());
-
-const TOKENS_RESERVED: u16 = 256;
-
 #[derive(Debug)]
 pub struct Translator {
-    session: String,
-    llm: LlamaModel
+    session: String
 }
 
 #[derive(Clone, Debug)]
@@ -50,14 +33,14 @@ impl Display for Seen {
         if let Some((_, ref enspeaker)) = self.speaker {
             write!(f, "[{enspeaker}]: ")?;
         }
-        write!(f, "{}<|endoftext|>", &self.enline)?;
+        write!(f, "{}<|end_of_text|>", &self.enline)?;
 
         Ok(())
     }
 }
 
-fn build_header(seen: &[Seen], next_speaker: Option<&str>) -> anyhow::Result<String> {
-    let cs = seen.iter()
+fn build_header(seen: &[Seen], next_speaker: Option<&str>, next_line: &str) -> anyhow::Result<String> {
+    let mut cs = seen.iter()
         .filter_map(|s| s.speaker.as_ref())
         .map(|(j, _)| j.as_str())
         .chain(next_speaker)
@@ -67,17 +50,33 @@ fn build_header(seen: &[Seen], next_speaker: Option<&str>) -> anyhow::Result<Str
             Err(e) => Some(Err(e))
         })
         .collect::<anyhow::Result<HashSet<&Character>>>()?;
-    let mut header = "<<METADATA>>\n".to_owned();
+
+    for c in characters::CHARACTERS.iter() {
+        if cs.contains(c) { continue }
+        if next_line.contains(c.jpspeaker) {
+            cs.insert(c);
+            continue
+        }
+        for (a, _) in c.aliases.iter() {
+            if next_line.contains(a) {
+                cs.insert(c);
+                continue
+            }
+        }
+    }
+
+    let mut header = "<|begin_of_text|><<METADATA>>\n".to_owned();
     for c in cs {
         write!(header, "[character] {c}\n")?;
     }
-    write!(header, "<<START>>\n")?;
+    //write!(header, "[element] Name: soul (魂（ゼーレ）) | Type: Terminology\n")?;
+    write!(header, "<<TRANSLATE>>\n")?;
 
     Ok(header)
 }
 
 fn build_prompt(seen: &[Seen], next_speaker: Option<&str>, next_line: &str) -> anyhow::Result<String> {
-    let mut prompt = build_header(seen, next_speaker)?;
+    let mut prompt = build_header(seen, next_speaker, next_line)?;
     for s in seen {
         write!(prompt, "{s}\n")?;
     }
@@ -86,9 +85,16 @@ fn build_prompt(seen: &[Seen], next_speaker: Option<&str>, next_line: &str) -> a
         write!(prompt, "[{next_speaker}]: ")?;
     }
     write!(prompt, "{next_line}\n<<ENGLISH>>\n")?;
-    if let Some(enspeaker) = next_speaker.map(decode_jp_speaker).transpose()? {
-        write!(prompt, "[{enspeaker}]: ")?;
-    }
+    //if let Some(enspeaker) = next_speaker.map(decode_jp_speaker).transpose()? {
+    //    write!(prompt, "[{enspeaker}]:")?;
+    //}
+
+    // force punctuation
+    //match next_line.chars().next() {
+    //    Some('（') => write!(prompt, "(")?,
+    //    Some('「') => write!(prompt, "\"")?,
+    //    _ => ()
+    //}
 
     Ok(prompt)
 }
@@ -105,81 +111,50 @@ impl Display for MaxTokensReachedError {
 
 impl std::error::Error for MaxTokensReachedError {}
 
+async fn tokenize(client: &Client, content: &str) -> anyhow::Result<Vec<u32>> {
+    client
+        .post("http://127.0.0.1:8080/tokenize")
+        .json(&json!({ "content": content }))
+        .send().await?.error_for_status()?
+        .json::<serde_json::Value>().await?
+        .pointer("/tokens").context("no tokens")?
+        .as_array().context("tokens is not array")?
+        .iter().map(|n| Ok(n.as_u64().context("not number")?.try_into()?)).collect()
+}
+
+async fn get_completion(client: &Client, prompt: &[u32], speaker: &str) -> anyhow::Result<String> {
+    let resp = client
+        .post("http://127.0.0.1:8080/completion")
+        .json(&if !speaker.is_empty() { json!({
+             "prompt": prompt,
+             "n_predict": 48,
+             "grammar": format!("root ::= \"{speaker}\" [^\\n]*")
+        }) } else { json!({ "prompt": prompt, "n_predict": 48 }) })
+        .send().await?.error_for_status()?
+        .json::<serde_json::Value>().await?;
+    
+    let content = resp
+        .pointer("/content").context("no content")?
+        .as_str().context("content is not string")?.to_owned();
+
+    let truncated = resp
+        .pointer("/truncated")
+        .and_then(|t| t.as_bool())
+        .unwrap_or(false);
+
+    if truncated {
+        Err(MaxTokensReachedError(content).into())
+    } else {
+        Ok(content)
+    }
+}
+
 impl Translator {
     pub fn new(session: String) -> anyhow::Result<Self> {
-        let llm = LlamaModel::load_from_file(
-            &LLAMA_BACKEND,
-            "/home/robbie/models/vntl-13b-v0.2-Q4_K_M.gguf", 
-            &LlamaModelParams::default()
-                .with_n_gpu_layers(if cfg!(feature = "cuda") {
-                    i32::MAX as u32
-                } else {
-                    0
-                })
-        )?;
-
-        Ok(Self { session, llm })
+        Ok(Self { session })
     }
 
-    fn get_completion(&self, prompt: &[LlamaToken], n_ctx: u16) -> anyhow::Result<String> {
-        let mut ctx = self.llm.new_context(
-            &LLAMA_BACKEND,
-            LlamaContextParams::default()
-                .with_seed(1234567890)
-                .with_n_ctx(NonZeroU32::new(n_ctx.into()))
-        )?;
-
-        let n_batch = ctx.n_batch().try_into()?;
-        let mut batch = LlamaBatch::new(n_batch, 1);
-
-        let mut chunks = prompt.chunks(n_batch).peekable();
-        let mut pos = 0;
-        while let Some(chunk) = chunks.next() {
-            batch.clear();
-            let mut tokens = chunk.iter().peekable();
-
-            while let Some(&token) = tokens.next() {
-                let last = chunks.peek().is_none() && tokens.peek().is_none();
-                batch.add(token, pos, &[0], last)?;
-                pos += 1
-            }
-
-            ctx.decode(&mut batch)?;
-        }
-
-        let mut ntokens = 0;
-        let mut tokens = String::new();
-        loop {
-            let token = ctx.sample_token_greedy(
-                LlamaTokenDataArray::from_iter(
-                    ctx.candidates_ith(batch.n_tokens() - 1),
-                    false
-                )
-            );
-            if token == self.llm.token_eos() {
-                break;
-            }
-            tokens.push_str(&self.llm.token_to_str(token)?);
-            if let Some(idx) = tokens.find(['<', '\n']) {
-                tokens.truncate(idx);
-                break;
-            }
-            ntokens += 1;
-            if ntokens >= TOKENS_RESERVED {
-                return Err(MaxTokensReachedError(tokens).into());
-            }
-            batch.clear();
-            batch.add(token, pos, &[0], true)?;
-            pos += 1;
-            ctx.decode(&mut batch)?;
-        }
-
-        Ok(tokens.trim().to_owned())
-    }
-
-    pub fn translate(&self, db: &mut Connection, script: u32) -> anyhow::Result<()> {
-        let n_ctx = self.llm.n_ctx_train().min(4096);
-
+    pub async fn translate(&self, cli: Client, db: &mut Connection, script: u32) -> anyhow::Result<()> {
         let mut seen = Vec::new();
 
         let mut tx = db.transaction()?;
@@ -191,13 +166,14 @@ impl Translator {
                 lines.address = translations.address AND
                 translations.session = ?
             WHERE lines.scriptid = ?
+            ORDER BY lines.address
         ")?;
 
         let mut rows = stmt.query((&self.session, script))?;
         while let Some(row) = rows.next()? {
             let (address, mut speaker, mut line, translation) = <(u32, String, String, Option<String>)>::try_from(row)?;
             if speaker == "#Name[1]" {
-                speaker = "メアリ".to_owned();
+                "メアリ".clone_into(&mut speaker);
             }
             line = line.replace("#Name[1]", "メアリ");
 
@@ -213,20 +189,38 @@ impl Translator {
                 continue;
             }
 
-            let prompt = loop {
-                let strprompt = build_prompt(&seen, (!speaker.is_empty()).then_some(&speaker), &line)?;
-                let prompt = self.llm.str_to_token(&strprompt, AddBos::Always)?;
-                if prompt.len() > (n_ctx - TOKENS_RESERVED).into() {
-                    seen.remove(0);
-                    continue;
-                }
-                break prompt;
+            eprintln!("address = {address}");
+            let speaker_prefix = if speaker.is_empty() { speaker.clone() } else {
+                format!("[{}]: ", decode_jp_speaker(&speaker)?)
             };
 
-            eprintln!("address = {address}");
-            eprintln!("{line}");
-            let translation = self.get_completion(&prompt, n_ctx)?;
-            eprintln!("{translation}\n");
+            let translation = loop {
+                let prompt = loop {
+                    let prompt = build_prompt(&seen, (!speaker.is_empty()).then_some(&speaker), &line)?;
+                    let tokens = tokenize(&cli, &prompt).await?;
+                    if tokens.len() > 8192-48 {
+                        seen.remove(0);
+                        continue;
+                    }
+                    break tokens
+                };
+
+
+                match get_completion(&cli, &prompt, &speaker_prefix).await {
+                    Ok(tl) => break tl.strip_prefix(&speaker_prefix).unwrap().trim().to_owned(),
+                    Err(e) => return Err(e)
+                    /*Err(e) => match e.downcast::<MaxTokensReachedError>() {
+                        Ok(e) => {
+                            eprintln!("{e}");
+                            seen.remove(0);
+                            continue
+                        },
+                        Err(e) => return Err(e)
+                    }*/
+                }
+            };
+            
+            eprintln!("{speaker_prefix}{translation}\n");
             tx.execute("
                 INSERT INTO translations(session, scriptid, address, translation)
                 VALUES (?, ?, ?, ?)

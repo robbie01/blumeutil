@@ -11,8 +11,8 @@ pub struct View {
 
 fn htmx() -> Script {
     Script::builder()
-        .src("https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.10/htmx.min.js")
-        .integrity("sha512-9qpauSP4+dDIldsrdNEZ2Z7JoyLZGfJsAP2wfXnc3drOh+5NXOBxjlq3sGXKdulmN9W+iwLxRt42zKMa8AHEeg==")
+        .src("https://cdnjs.cloudflare.com/ajax/libs/htmx/2.0.2/htmx.min.js")
+        .integrity("sha512-iRA+DJgDLUKPk+pqGpAM3+wSDeO5iKQkYXGtIv4+EA8oJWN1mewMJD7kWC9hHCyUTdey9bQypAhx6PASWShjOw==")
         .crossorigin("anonymous")
         .referrerpolicy("no-referrer")
         .build()
@@ -73,12 +73,20 @@ impl View {
         rows: impl IntoIterator<Item = Row>
     ) -> impl Display {
         html::root::Html::builder()
+            .lang("en")
             .head(|b| b
                 .meta(|b| b.charset("utf-8"))
                 .title(|b| b.text("Bruh"))
                 .style(|b| b.text(include_str!("view.css"))))
             .body(|b| b
                 .table(|b| b
+                    .table_column_group(|b| b
+                        .table_column(|b| b
+                            .span("2")
+                            .class("meta-cols"))
+                        .table_column(|b| b
+                            .span("3")
+                            .class("text-cols")))
                     .table_head(|b| b
                         .table_row(|b| b
                             .table_header(|b| b.text("address"))
@@ -92,7 +100,7 @@ impl View {
                         .extend(rows.into_iter().map(|Row { address, speaker, original, control, current }|
                             TableRow::builder()
                                 .table_cell(|b| b.text(address.to_string()))
-                                .table_cell(|b| b.text(speaker))
+                                .table_cell(|b| b.lang("ja").text(speaker))
                                 .table_cell(|b| b.lang("ja").text(original))
                                 .table_cell(|b| b.text(control))
                                 .push(self.render_current(session, scriptid, address, current))

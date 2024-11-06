@@ -9,15 +9,15 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 encoding_rs = "0.8"
-tokio = { version = "1.35", features = ["macros", "rt"] }
-rusqlite = { version = "0.31", features = ["bundled", "blob"] }
-clap = { version = "4.4", features = ["derive"] }
+tokio = { version = "1.39", features = ["macros", "rt"] }
+rusqlite = { version = "0.32", features = ["bundled", "blob"] }
+clap = { version = "4.5", features = ["derive"] }
 rand = "0.8"
-bytes = "1.5"
-base64 = "0.21"
+bytes = "1.6"
+base64 = "0.22"
 once_cell = "1.19"
 png = "0.17"
-rayon = "1.9"
+rayon = "1.10"
 
 # web only
 serde = { version = "1", features = ["derive"], optional = true }
@@ -28,19 +28,12 @@ html = { version = "0.6", optional = true }
 
 # translate only
 serde_json = { version = "1", optional = true }
-reqwest = { version = "0.11", optional = true, features = ["json"] }
-
-[dependencies.llama]
-package = "llama-cpp-2"
-git = "https://github.com/utilityai/llama-cpp-rs.git"
-rev = "4d0c363"
-optional = true
+reqwest = { version = "0.12", optional = true, features = ["json"] }
 
 [features]
-workit = ["web", "translate", "cuda"]
+workit = ["web", "translate"]
 web = ["dep:axum", "dep:tower-http", "dep:html", "dep:tracing-subscriber", "dep:serde"]
-translate = ["dep:llama", "dep:reqwest", "dep:serde_json"]
-cuda = ["llama/cublas"]
+translate = ["dep:reqwest", "dep:serde_json"]
 
 [profile.release]
 overflow-checks = true

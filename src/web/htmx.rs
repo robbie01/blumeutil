@@ -2,6 +2,7 @@ use std::{future, convert::Infallible};
 
 use axum::extract::FromRequestParts;
 
+#[allow(dead_code)]
 pub struct IsHtmx(pub bool);
 
 impl<S> FromRequestParts<S> for IsHtmx {

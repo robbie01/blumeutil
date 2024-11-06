@@ -1,14 +1,15 @@
-use std::{borrow::Cow, cmp::Ordering, collections::{BTreeMap, btree_map}, fmt::Write as _, path::PathBuf, str};
+use std::{io, fs::File, borrow::Cow, cmp::Ordering, collections::{btree_map, BTreeMap}, fmt::Write as _, path::PathBuf, str};
 use anyhow::{anyhow, bail, ensure, Context as _};
-use bytes::{Buf as _, Bytes, BytesMut};
+use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 use clap::Parser;
 use rusqlite::Connection;
 use base64::{display::Base64Display, engine::general_purpose::STANDARD};
 use encoding_rs::SHIFT_JIS;
 
-const STCM2_MAGIC: &[u8] = b"STCM2 File Make By Minku 07.0\0\0\0";
+const STCM2_MAGIC: &[u8] = b"STCM2";
+const STCM2_TAG_LENGTH: usize = 32 - STCM2_MAGIC.len();
 const GLOBAL_DATA_MAGIC: &[u8] = b"GLOBAL_DATA\0\0\0\0\0";
-const GLOBAL_DATA_OFFSET: usize = STCM2_MAGIC.len() + 12*4 + GLOBAL_DATA_MAGIC.len();
+const GLOBAL_DATA_OFFSET: usize = STCM2_MAGIC.len() + STCM2_TAG_LENGTH + 12*4 + GLOBAL_DATA_MAGIC.len();
 const CODE_START_MAGIC: &[u8] = b"CODE_START_\0";
 const EXPORT_DATA_MAGIC: &[u8] = b"EXPORT_DATA\0";
 
@@ -85,6 +86,7 @@ impl Action {
 
 #[derive(Clone, Debug)]
 struct Stcm2 {
+    tag: Bytes,
     global_data: Bytes,
     actions: BTreeMap<u32, Action>
 }
@@ -101,6 +103,7 @@ fn from_bytes(mut file: Bytes) -> anyhow::Result<Stcm2> {
 
     ensure!(file.starts_with(STCM2_MAGIC));
     file.advance(STCM2_MAGIC.len());
+    let tag = file.split_to(STCM2_TAG_LENGTH);
     let export_addr = file.get_u32_le();
     let export_len = file.get_u32_le();
     for _ in 0..10 {
@@ -158,15 +161,16 @@ fn from_bytes(mut file: Bytes) -> anyhow::Result<Stcm2> {
     }
 
     Ok(Stcm2 {
+        tag,
         global_data,
         actions
     })
 }
 
 #[derive(Parser)]
-struct Args {
-    file: PathBuf,
-    id: u32
+enum Args {
+    Database { db: PathBuf, id: u32 },
+    File { file: PathBuf }
 }
 
 fn decode_sjis(buf: &[u8]) -> anyhow::Result<Cow<'_, str>> {
@@ -175,9 +179,19 @@ fn decode_sjis(buf: &[u8]) -> anyhow::Result<Cow<'_, str>> {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let db = Connection::open(args.file)?;
-    let file = db.query_row("SELECT script FROM patchedscripts WHERE id = ?", (args.id,),
-        |row| Ok(Bytes::copy_from_slice(row.get_ref(0)?.as_blob()?)))?;
+    let file = match args {
+        Args::Database { db, id } => {
+            let db = Connection::open(db)?;
+            db.query_row("SELECT script FROM scripts WHERE id = ?", (id,),
+               |row| Ok(Bytes::copy_from_slice(row.get_ref(0)?.as_blob()?)))?
+        },
+        Args::File { file } => {
+            let mut b = BytesMut::new().writer();
+            io::copy(&mut File::open(file)?, &mut b)?;
+            b.into_inner().freeze()
+        }
+    };
+
     let mut stcm2 = from_bytes(file)?;
 
     //let s = stcm2.actions.values().map(|act| act.opcode).collect::<std::collections::BTreeSet<u32>>();
@@ -221,7 +235,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    println!(".tag \"{}\"", str::from_utf8(&STCM2_MAGIC[5..]).context("nooooo")?.trim_end_matches('\0'));
+    println!(".tag \"{}\"", str::from_utf8(&stcm2.tag).context("nooooo")?.trim_end_matches('\0'));
     println!(".global_data {}", Base64Display::new(&stcm2.global_data, &STANDARD));
     println!(".code_start");
     for act in stcm2.actions.values() {
@@ -229,41 +243,34 @@ fn main() -> anyhow::Result<()> {
             print!("{label}: ");
         }
         match *act {
-            Action { call: true, opcode, ref params, ref data, .. } => {
-                print!("call {}", stcm2.actions.get(&opcode).context("bruh")?.label().context("bruh2")?);
-                for &param in params.iter() {
-                    match param {
-                        Parameter::Value(v) => print!(", {v:X}"),
-                        Parameter::GlobalPointer(addr) => print!(", [{}]", stcm2.actions.get(&addr).context("bruh3")?.label().context("bruh4")?),
-                        Parameter::LocalPointer(addr) => print!(", [data+{addr}]")
-                    }
-                }
-
-                if !data.is_empty() {
-                    print!(", {}", Base64Display::new(data, &STANDARD));
-                }
-            },
-            Action { opcode: Action::OP_YIELD, ref params, ref data, .. } if params.is_empty() && data.is_empty() => {
+            Action { call: false, opcode: Action::OP_YIELD, ref params, ref data, .. } if params.is_empty() && data.is_empty() => {
                 print!("yield");
             },
-            Action { opcode: Action::OP_SPEAKER, ref params, ref data, .. } if matches!(params[..], [Parameter::LocalPointer(0)]) => {
+            Action { call: false, opcode: Action::OP_SPEAKER, ref params, ref data, .. } if matches!(params[..], [Parameter::LocalPointer(0)]) => {
                 let (s, tail) = decode_string(0, data.clone())?;
                 ensure!(tail.is_empty());
                 print!("speaker \"{}\"", decode_sjis(&s)?);
             },
-            Action { opcode: Action::OP_LINE, ref params, ref data, .. } if matches!(params[..], [Parameter::LocalPointer(0)]) => {
+            Action { call: false, opcode: Action::OP_LINE, ref params, ref data, .. } if matches!(params[..], [Parameter::LocalPointer(0)]) => {
                 let (s, tail) = decode_string(0, data.clone())?;
                 ensure!(tail.is_empty());
                 print!("line \"{}\"", decode_sjis(&s)?);
             },
-            Action { opcode: Action::OP_CHOICE, ref params, ref data, .. } if matches!(params[..], [Parameter::LocalPointer(0), Parameter::Value(v)] if v & 0xFF000000 == 0xFF000000) => {
+            Action { call: false, opcode: Action::OP_CHOICE, ref params, ref data, .. } if matches!(params[..], [Parameter::LocalPointer(0), Parameter::Value(v)] if v & 0xFF000000 == 0xFF000000) => {
                 let [Parameter::LocalPointer(0), Parameter::Value(v)] = params[..] else { unreachable!() };
                 let (s, tail) = decode_string(0, data.clone())?;
                 ensure!(tail.is_empty());
                 print!("choice {:X}, \"{}\"", v & !0xFF000000, decode_sjis(&s)?);
             },
-            Action { opcode, ref params, ref data, .. } => {
-                print!("raw {opcode:X}");
+            Action { call, opcode, ref params, ref data, .. } => {
+                if call {
+                    print!("call {}", stcm2.actions.get(&opcode).context("bruh")?.label().context("bruh2")?);
+                } else if opcode == 0x7A {
+                    print!("raw voice");
+                } else {
+                    print!("raw {opcode:X}");
+                }
+
                 for &param in params.iter() {
                     match param {
                         Parameter::Value(v) => print!(", {v:X}"),

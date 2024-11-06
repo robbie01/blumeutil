@@ -1,9 +1,27 @@
+body {
+    /* overflow-x: hidden; */
+}
+
+table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+col.meta-cols {
+    width: 9.5%;
+}
+
+col.text-cols {
+    width: 27%;
+}
+
 table, th, td {
     border: 1px solid black;
 }
 
 th, td {
     padding: 5px;
+    word-break: break-word;
 }
 
 .current {

@@ -44,6 +44,7 @@ impl Model {
             LEFT JOIN translations AS current
                 ON current.session = ? AND current.scriptid = lines.scriptid AND current.address = lines.address
             WHERE lines.scriptid = ?
+            ORDER BY lines.address
         ")?;
 
         let rows = stmt

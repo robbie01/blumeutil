@@ -78,7 +78,7 @@ pub static CHARACTERS: Lazy<Box<[Character]>> = Lazy::new(|| Box::new([
         enspeaker: "Auguste",
         gender: "Male",
         jpfull: Some("オーギュスト・ミュラー"),
-        enfull: Some("Auguste Mueller"),
+        enfull: Some("Auguste Müller"),
         ..Default::default()
     },
     Character {

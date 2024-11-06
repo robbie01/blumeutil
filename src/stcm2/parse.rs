@@ -5,6 +5,7 @@ use anyhow::ensure;
 use encoding_rs::SHIFT_JIS;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum Dialogue {
     Choice {
         addr: u32,

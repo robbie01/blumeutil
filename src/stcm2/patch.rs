@@ -73,9 +73,9 @@ impl Token {
     }
 
     fn rep(&self) -> &[u8] {
-        match *self {
-            Self::Fullwidth(ref c) => c,
-            Self::Halfwidth(ref c) => slice::from_ref(c),
+        match self {
+            Self::Fullwidth(c) => c,
+            Self::Halfwidth(c) => slice::from_ref(c),
             Self::Name => b"#Name[1]"
         }
     }
@@ -141,7 +141,7 @@ fn split_lines_intelligent(input: &[Token]) -> Vec<Vec<u8>> {
         }
     }
     if cur_width > 0 {
-        assert!(cur_width <= MAX_LINE_LENGTH);
+        assert!(cur_width <= MAX_LINE_LENGTH, "{}", SHIFT_JIS.decode_without_bom_handling(&cur_line).0);
         v.push(cur_line);
     }
     v
@@ -152,7 +152,7 @@ pub fn patch(mut db: Connection, args: Args) -> anyhow::Result<()> {
 
     let mut tls = HashMap::new();
     {
-        let mut stmt = tx.prepare("SELECT address, translation FROM translations WHERE session = 'vntl-greedy-20240220' AND scriptid = ?")?;
+        let mut stmt = tx.prepare("SELECT address, translation FROM translations WHERE session = 'vntl-greedy-20240823' AND scriptid = ?")?;
         let mut rows = stmt.query((args.id,))?;
         while let Some(row) = rows.next()? {
             let (address, translation) = <(u32, String)>::try_from(row)?;
@@ -225,36 +225,27 @@ pub fn patch(mut db: Connection, args: Args) -> anyhow::Result<()> {
 
                             let (translation, _, false) = SHIFT_JIS.encode(&translation) else { bail!("found invalid sjis chars") };
 
-                            let lines = {
-                                let tokens = tokenize(&translation).collect::<Vec<_>>();
-                                let lines = split_lines_intelligent(&tokens);
-                                if lines.len() > 3 {
-                                    eprintln!("warning: split went overlong");
-                                }
-                                lines
-                            };
+                            let tokens = tokenize(&translation).collect::<Vec<_>>();
+                            let lines = split_lines_intelligent(&tokens);
 
                             let mut yield_counter = 0;
 
                             for line in lines {
                                 if yield_counter >= 3 {
+                                    eprintln!("warning: inserting yield");
                                     yield_counter = 0;
                                     new_actions.insert(addr, Action {
-                                        export: None,
-                                        call: false,
                                         opcode: Action::OP_YIELD,
-                                        params: Vec::new(),
-                                        data: Bytes::new()
+                                        ..Default::default()
                                     });
                                     addr.sub += 1;
                                 }
 
                                 new_actions.insert(addr, Action {
-                                    export: None,
-                                    call: false,
                                     opcode: Action::OP_LINE,
                                     params: vec![Parameter::LocalPointer(0)],
-                                    data: encode_string(&line)?.freeze()
+                                    data: encode_string(&line)?.freeze(),
+                                    ..Default::default()
                                 });
                                 addr.sub += 1;
                                 yield_counter += 1;

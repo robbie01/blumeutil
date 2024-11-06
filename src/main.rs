@@ -10,6 +10,7 @@ mod translate;
 mod web;
 mod cleanup;
 mod checkpunct;
+mod script;
 // mod iso;
 
 use std::path::PathBuf;
@@ -37,7 +38,8 @@ enum Command {
     #[cfg(feature = "web")]
     Web(web::Args),
     Cleanup(cleanup::Args),
-    Checkpunct(checkpunct::Args)
+    Checkpunct(checkpunct::Args),
+    Script(script::Args)
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -68,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
         #[cfg(feature = "web")]
         Web(margs) => web::run(db, margs).await,
         Cleanup(margs) => cleanup::run(db, margs),
-        Checkpunct(margs) => checkpunct::run(db, margs)
+        Checkpunct(margs) => checkpunct::run(db, margs),
+        Script(margs) => script::run(db, margs)
     }
 }

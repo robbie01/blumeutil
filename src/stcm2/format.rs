@@ -1,10 +1,13 @@
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::{anyhow, bail, ensure};
+use anyhow::{anyhow, bail, ensure, Context as _};
 use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 
-const STCM2_MAGIC: &[u8] = b"STCM2 File Make By Minku 07.0\0\0\0";
+//const STCM2_MAGIC: &[u8] = b"STCM2 File Make By Minku 07.0\0\0\0";
+const STCM2_MAGIC: &[u8] = b"STCM2";
+const STCM2_TAG_LENGTH: usize = 32 - STCM2_MAGIC.len();
 const GLOBAL_DATA_MAGIC: &[u8] = b"GLOBAL_DATA\0\0\0\0\0";
+const GLOBAL_DATA_OFFSET: usize = STCM2_MAGIC.len() + STCM2_TAG_LENGTH + 12*4 + GLOBAL_DATA_MAGIC.len();
 const CODE_START_MAGIC: &[u8] = b"CODE_START_\0";
 const EXPORT_DATA_MAGIC: &[u8] = b"EXPORT_DATA\0";
 
@@ -15,6 +18,7 @@ pub struct Address {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub enum Operation {
     Speaker {
         addr: u32,
@@ -30,12 +34,6 @@ pub enum Operation {
         s: Bytes
     },
     Unknown(Action)
-}
-
-#[derive(Clone, Debug)]
-pub struct Export {
-    name: Bytes,
-    addr: u64
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -82,7 +80,7 @@ impl Parameter {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Action {
     pub export: Option<Bytes>,
     pub call: bool,
@@ -113,6 +111,7 @@ pub fn decode_string(addr: u32, mut str: Bytes) -> anyhow::Result<Bytes> {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 struct DecodeUnimplemented;
 
 impl std::error::Error for DecodeUnimplemented {}
@@ -188,87 +187,76 @@ enum Reference {
 
 #[derive(Clone, Debug)]
 pub struct Stcm2 {
+    pub tag: Bytes,
     pub global_data: Bytes,
     pub actions: BTreeMap<Address, Action>
 }
 
-pub fn from_bytes(file: Bytes) -> anyhow::Result<Stcm2> {
-    let (export_addr, export_len, global_data) = {
-        let mut file = file.clone();
-        ensure!(file.starts_with(STCM2_MAGIC), "bad magic");
-        file.advance(STCM2_MAGIC.len());
-        let export_addr = file.get_u32_le() as usize;
-        let unknown1 = file.get_u32_le();
-        for _ in 0..10 {
-            ensure!(file.get_u32_le() == 0);
-        }
-        ensure!(file.starts_with(GLOBAL_DATA_MAGIC), "bad global data magic");
-        file.advance(GLOBAL_DATA_MAGIC.len());
-        let mut global_len = 0;
-        while !file[global_len..].starts_with(CODE_START_MAGIC) {
-            global_len += 16;
-        }
-        let global_data = file.split_to(global_len);
-        (export_addr, unknown1, global_data)
-    };
-
-    let mut exports = {
-        let mut file = file.clone();
-        file.advance(export_addr);
-
-        let mut exports = Vec::with_capacity(export_len as usize);
-        while exports.len() < export_len as usize {
-            ensure!(file.get_u32_le() == 0, "export does not begin with 0");
-            exports.push(Export { name: file.split_to(32), addr: file.get_u32_le().into() });
-        }
-
-        exports
-    };
-
-    let mut file = file;
+pub fn from_bytes(mut file: Bytes) -> anyhow::Result<Stcm2> {
     let start_addr = file.as_ptr();
+    let get_pos = |file: &Bytes| file.as_ptr() as usize - start_addr as usize;
 
-    // CODE_START_ will be 16-byte aligned
-    while !file.starts_with(CODE_START_MAGIC) {
-        file.advance(16);
+    ensure!(file.starts_with(STCM2_MAGIC));
+    file.advance(STCM2_MAGIC.len());
+    let tag = file.split_to(STCM2_TAG_LENGTH);
+    let export_addr = file.get_u32_le();
+    let export_len = file.get_u32_le();
+    for _ in 0..10 {
+        ensure!(file.get_u32_le() == 0);
     }
+    ensure!(file.starts_with(GLOBAL_DATA_MAGIC));
+    file.advance(GLOBAL_DATA_MAGIC.len());
+    ensure!(get_pos(&file) == GLOBAL_DATA_OFFSET);
+    let mut global_len = 0;
+    while !file[global_len..].starts_with(CODE_START_MAGIC) {
+        global_len += 16;
+    }
+    let global_data = file.split_to(global_len);
+    ensure!(file.starts_with(CODE_START_MAGIC));
     file.advance(CODE_START_MAGIC.len());
 
     let mut actions = BTreeMap::new();
-    loop {
-        let addr = (file.as_ptr() as usize - start_addr as usize).try_into()?;
-        
+
+    while get_pos(&file) < usize::try_from(export_addr)? - EXPORT_DATA_MAGIC.len() {
+	    let addr = get_pos(&file).try_into()?;
+		
         let global_call = file.get_u32_le();
         let opcode = file.get_u32_le();
         let nparams = file.get_u32_le();
         let length = file.get_u32_le();
-
-        if length == 0 { break }
 
         let call = match global_call {
             0 => false,
             1 => true,
             v => bail!("global_call = {v:08X}")
         };
-        let mut params = Vec::with_capacity(nparams as usize);
+        let mut params = Vec::with_capacity(nparams.try_into()?);
         for _ in 0..nparams {
             let buffer = [file.get_u32_le(), file.get_u32_le(), file.get_u32_le()];
             params.push(Parameter::parse(buffer, addr + 16 + 12*nparams, length - 16 - 12*nparams)?);
         }
 
         let ndata = length - 16 - 12*nparams;
-        let data = file.split_to(ndata as usize);
+        let data = file.split_to(ndata.try_into()?);
 
-        let export = exports.iter()
-            .position(|e| e.addr == u64::from(addr))
-            .map(|i| exports.swap_remove(i).name);
-
-        actions.insert(Address { orig: addr, sub: 0 }, Action { export, call, opcode, params, data });
+        let res = actions.insert(Address { orig: addr, sub: 0 }, Action { export: None, call, opcode, params, data });
+        ensure!(res.is_none());
     }
 
-    ensure!(exports.is_empty(), "exports left over!");
+    ensure!(file.starts_with(EXPORT_DATA_MAGIC));
+    file.advance(EXPORT_DATA_MAGIC.len());
+
+    for _ in 0..export_len {
+        ensure!(file.get_u32_le() == 0);
+        let export = file.split_to(32);
+        let addr = file.get_u32_le();
+        let act = actions.get_mut(&Address { orig: addr, sub: 0 }).context("export does not match known action")?;
+        ensure!(act.export.is_none());
+        act.export = Some(export);
+    }
 
     Ok(Stcm2 {
+        tag,
         global_data,
         actions
     })
@@ -279,6 +267,7 @@ type Resolver = Box<dyn Fn(&mut HashMap<Reference, u32>, &mut [u8]) -> bool>;
 pub fn to_bytes(input: Stcm2) -> anyhow::Result<BytesMut> {
     let mut resolvers = Vec::<Resolver>::new();
     let mut output = BytesMut::from(STCM2_MAGIC);
+    output.put_slice(&input.tag);
     let mut refs = HashMap::<Reference, u32>::default();
     let export_addr_loc = output.len();
     output.put_u32_le(0);

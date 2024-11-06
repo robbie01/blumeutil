@@ -3,6 +3,7 @@ use axum::http::StatusCode;
 
 pub trait ResultExt<T, E> {
     fn with_ise(self) -> axum::response::Result<T> where E: Display;
+    #[allow(dead_code)]
     fn with_ise_msg(self, msg: &'static str) -> axum::response::Result<T>;
 }
 
@@ -16,6 +17,7 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
     }
 }
 
+// wtf was i thinking?
 impl<T> ResultExt<T, Infallible> for Option<T> {
     fn with_ise(self) -> axum::response::Result<T> where Infallible: Display {
         unreachable!()
