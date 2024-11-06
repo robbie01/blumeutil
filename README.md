@@ -16,3 +16,10 @@ There are also two additional executables:
 
 - `disasm`: experimental STCM2 disassembler
 - `art`: yank art files from UNI2 files. confirmed to work with back.uni, chara.uni, etc.uni, memory.uni, and system.uni
+
+## Acknowledgements
+
+This project is eternally indebted to:
+
+- UNI2 format: <https://mce.do.am/forum/25-36-1>
+- STCM2 editor (only practical format description): <https://github.com/xyzz/hkki>
