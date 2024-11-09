@@ -23,4 +23,4 @@ This project is eternally indebted to:
 
 - UNI2 format: <https://mce.do.am/forum/25-36-1>
 - STCM2 editor (only practical format description): <https://github.com/xyzz/hkki>
-- most importantly: [lmg-anon](https://huggingface.co/lmg-anon) for their continual work on the VNTL modelsR
+- most importantly: [lmg-anon](https://huggingface.co/lmg-anon) for their continual work on the VNTL models
